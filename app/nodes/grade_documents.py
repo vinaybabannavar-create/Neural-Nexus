@@ -7,6 +7,7 @@ decide whether it is relevant to the question.
 Input  state keys : question, documents
 Output state keys : documents (filtered), relevance_score
 """
+import time
 from loguru import logger
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -56,6 +57,7 @@ def grade_documents(state: GraphState) -> GraphState:
     Keeps only relevant documents.
     Calculates an average relevance_score (1.0 = all relevant, 0.0 = none).
     """
+    start_time = time.time()
     question = state["question"]
     documents = state["documents"]
 
@@ -97,4 +99,6 @@ def grade_documents(state: GraphState) -> GraphState:
         **state,
         "documents": relevant_docs,
         "relevance_score": avg_score,
+        "node_execution_times": {"grade_documents": time.time() - start_time}
     }
+

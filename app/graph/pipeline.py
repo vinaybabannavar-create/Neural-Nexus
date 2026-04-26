@@ -7,10 +7,16 @@ Graph topology
   [START]
      │
      ▼
-  retrieve          ← Node 1: vector DB retrieval
+  transform_query    ← Node 0: de-contextualize if follow-up
      │
      ▼
-  grade_documents   ← Node 2: DeepSeek-R1 relevance grader
+  retrieve           ← Node 1: vector DB retrieval (K=10)
+     │
+     ▼
+  rerank             ← Node 1.5: filter to top 5
+     │
+     ▼
+  grade_documents    ← Node 2: DeepSeek-R1 relevance grader
      │
      ├─ relevant ──────────────────┐
      │                             │
@@ -35,7 +41,9 @@ from langgraph.graph import StateGraph, START, END
 from loguru import logger
 
 from app.graph.state import GraphState
+from app.nodes.transform_query import transform_query
 from app.nodes.retrieve import retrieve
+from app.nodes.rerank import rerank
 from app.nodes.grade_documents import grade_documents
 from app.nodes.web_search import web_search
 from app.nodes.generate import generate
@@ -98,17 +106,25 @@ def build_graph():
     graph = StateGraph(GraphState)
 
     # Register nodes
+    graph.add_node("transform_query", transform_query)
     graph.add_node("retrieve", retrieve)
+    graph.add_node("rerank", rerank)
     graph.add_node("grade_documents", grade_documents)
     graph.add_node("web_search", web_search)
     graph.add_node("generate", generate)
     graph.add_node("grade_hallucinations", grade_hallucinations)
 
     # Entry point
-    graph.add_edge(START, "retrieve")
+    graph.add_edge(START, "transform_query")
 
-    # retrieve → grade_documents (always)
-    graph.add_edge("retrieve", "grade_documents")
+    # transform_query → retrieve
+    graph.add_edge("transform_query", "retrieve")
+
+    # retrieve → rerank
+    graph.add_edge("retrieve", "rerank")
+
+    # rerank → grade_documents
+    graph.add_edge("rerank", "grade_documents")
 
     # grade_documents → web_search OR generate (conditional)
     graph.add_conditional_edges(
@@ -139,6 +155,7 @@ def build_graph():
     compiled = graph.compile()
     logger.info("[GRAPH] Corrective RAG pipeline compiled successfully")
     return compiled
+
 
 
 # Singleton — import this in your app

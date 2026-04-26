@@ -218,6 +218,9 @@ def generate_suggested_questions(text: str):
     except Exception as e:
         return ["What is the main topic of this document?", "Can you summarize the key findings?", "Who are the main entities mentioned?"]
 
+from langchain_core.messages import HumanMessage, AIMessage
+import json
+
 # ── Sidebar ──────────────────────────────────────────────────
 with st.sidebar:
     if logo_base64:
@@ -232,7 +235,7 @@ with st.sidebar:
 
     with tab_file:
         uploaded = st.file_uploader("", type=["pdf", "txt", "md"], label_visibility="collapsed")
-        if st.button("🚀 Ingest Document", use_container_width=True, disabled=uploaded is None):
+        if st.button("🚀 Ingest Document", key="ingest_btn", use_container_width=True, disabled=uploaded is None):
             from app.ingest import ingest
             suffix = Path(uploaded.name).suffix
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -247,7 +250,6 @@ with st.sidebar:
                         with open(tmp_path, "r", encoding="utf-8") as f:
                             sample_text = f.read(5000)
                     else:
-                        # For PDF, we just note we processed it
                         sample_text = f"A document named {uploaded.name}"
                     
                     ingest(tmp_path)
@@ -260,8 +262,8 @@ with st.sidebar:
                     Path(tmp_path).unlink(missing_ok=True)
 
     with tab_url:
-        url = st.text_input("Source URL")
-        if st.button("🌐 Ingest URL", use_container_width=True, disabled=not url):
+        url = st.text_input("Source URL", key="url_input")
+        if st.button("🌐 Ingest URL", key="url_btn", use_container_width=True, disabled=not url):
             from app.ingest import ingest
             with st.spinner("Reading URL..."):
                 try:
@@ -274,8 +276,25 @@ with st.sidebar:
 
     st.divider()
     st.markdown("### ⚙️ Engine Settings")
-    show_debug = st.checkbox("Show Debug Metadata", value=False)
-    st.info("Active Provider: **Groq + DeepSeek**")
+    show_debug = st.checkbox("Show Performance Metrics", value=True)
+    
+    # Export Chat
+    if "messages" in st.session_state and st.session_state.messages:
+        chat_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
+        st.download_button(
+            label="💾 Export Chat (MD)",
+            data=chat_text,
+            file_name="neural_nexus_chat.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+    
+    if st.button("🗑️ Clear Conversation", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.langchain_messages = []
+        st.rerun()
+
+    st.info("Active Provider: **Groq + DeepSeek + FlashRank**")
 
 # ── Main Content ──────────────────────────────────────────────
 st.markdown("<div class='main-header'>Neural Nexus</div>", unsafe_allow_html=True)
@@ -286,10 +305,8 @@ if "suggested_questions" in st.session_state and st.session_state.suggested_ques
     st.markdown("<div style='margin-top: 2rem; margin-bottom: 1rem;'>", unsafe_allow_html=True)
     st.markdown(f"<p style='font-size: 0.9rem; opacity: 0.6; margin-left: 5px;'>✨ INSIGHTS FOR: <b>{st.session_state.get('last_ingested', 'Document')}</b></p>", unsafe_allow_html=True)
     
-    # Use columns but with more control
     q_cols = st.columns(len(st.session_state.suggested_questions))
     for i, q in enumerate(st.session_state.suggested_questions):
-        # Clean up question text if too long
         display_q = q if len(q) < 60 else q[:57] + "..."
         if q_cols[i].button(f"🔍 {display_q}", key=f"sq_{i}", use_container_width=True, help=q):
             st.session_state.pending_question = q
@@ -298,8 +315,9 @@ if "suggested_questions" in st.session_state and st.session_state.suggested_ques
 # ── Chat Interface ────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "langchain_messages" not in st.session_state:
+    st.session_state.langchain_messages = []
 
-# Container for chat history
 chat_container = st.container()
 
 with chat_container:
@@ -307,19 +325,30 @@ with chat_container:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if msg["role"] == "assistant" and show_debug and "meta" in msg:
-                with st.expander("Engine Analytics"):
-                    st.json(msg["meta"])
+                with st.expander("Engine Analytics & Latency"):
+                    m = msg["meta"]
+                    cols = st.columns(len(m.get("latencies", {})) or 1)
+                    for i, (node, duration) in enumerate(m.get("latencies", {}).items()):
+                        cols[i % len(cols)].metric(node.replace("_", " ").title(), f"{duration:.2f}s")
+                    
+                    if "docs" in msg:
+                        st.divider()
+                        st.markdown("**Retrieved Context Preview:**")
+                        for i, doc in enumerate(msg["docs"]):
+                            with st.expander(f"📄 Chunk {i+1} | Score: {doc.get('score', 'N/A')}"):
+                                st.code(doc["content"])
 
 # Handle pending question from suggested chips
 if "pending_question" in st.session_state:
     question = st.session_state.pop("pending_question")
-    # Manual trigger of the chat logic
 else:
     question = st.chat_input("Ask the agent anything...")
 
 if question:
     # Display user message
     st.session_state.messages.append({"role": "user", "content": question})
+    st.session_state.langchain_messages.append(HumanMessage(content=question))
+    
     with chat_container:
         with st.chat_message("user"):
             st.markdown(question)
@@ -334,13 +363,15 @@ if question:
 
                 initial_state = {
                     "question": question,
+                    "messages": st.session_state.langchain_messages,
                     "documents": [],
                     "generation": None,
                     "web_search_used": False,
                     "retry_count": 0,
                     "relevance_score": 0.0,
                     "sources": [],
-                    "hallucination_check": "grounded"
+                    "hallucination_check": "grounded",
+                    "node_execution_times": {}
                 }
 
                 try:
@@ -350,6 +381,14 @@ if question:
                     web_used = result.get("web_search_used", False)
                     relevance = result.get("relevance_score", 0.0)
                     retries = result.get("retry_count", 1)
+                    latencies = result.get("node_execution_times", {})
+                    docs = [
+                        {"content": d.page_content, "score": d.metadata.get("relevance_score", "N/A")} 
+                        for d in result.get("documents", [])
+                    ]
+
+                    # Update history with the ACTUAL result from the graph (which has the AIMessage)
+                    st.session_state.langchain_messages = result.get("messages", st.session_state.langchain_messages)
 
                     # Display answer
                     answer_placeholder.markdown(answer)
@@ -359,7 +398,7 @@ if question:
                     m_cols = st.columns(3)
                     m_cols[0].metric("Relevance", f"{relevance:.0%}")
                     m_cols[1].metric("Method", "🌐 Web Search" if web_used else "📚 Vector DB")
-                    m_cols[2].metric("Refinements", retries)
+                    m_cols[2].metric("Total Latency", f"{sum(latencies.values()):.2f}s")
                     
                     if sources:
                         with st.expander("📎 Verified Sources"):
@@ -372,12 +411,14 @@ if question:
                         "relevance_score": relevance,
                         "retry_count": retries,
                         "sources": sources,
+                        "latencies": latencies
                     }
 
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": answer,
                         "meta": meta,
+                        "docs": docs
                     })
 
                 except Exception as e:
@@ -387,5 +428,5 @@ if question:
                         "role": "assistant",
                         "content": error_msg,
                     })
-    # Force refresh to clear the suggested questions or handle next input
     st.rerun()
+

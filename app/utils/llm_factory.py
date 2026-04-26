@@ -18,7 +18,7 @@ def get_generator_llm():
         try:
             from langchain_groq import ChatGroq
             return ChatGroq(
-                model=settings.GENERATION_MODEL if "llama" in settings.GENERATION_MODEL else "llama-3.3-70b-versatile",
+                model=settings.GENERATION_MODEL if "llama" in settings.GENERATION_MODEL else "llama-3.1-8b-instant",
                 temperature=0,
                 groq_api_key=settings.GROQ_API_KEY,
             )

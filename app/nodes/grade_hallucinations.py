@@ -7,6 +7,7 @@ context documents. If not, signals the graph to loop back to generate.
 Input  state keys : generation, documents
 Output state keys : (state unchanged — routing decision made in graph edges)
 """
+import time
 from loguru import logger
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -58,6 +59,7 @@ def grade_hallucinations(state: GraphState) -> GraphState:
     Check whether the generated answer is grounded in the context.
     Adds 'hallucination_check' to state for routing.
     """
+    start_time = time.time()
     generation = state.get("generation", "")
     documents = state.get("documents", [])
 
@@ -66,6 +68,7 @@ def grade_hallucinations(state: GraphState) -> GraphState:
     if not generation:
         logger.warning("[HALLUCINATION CHECK] No generation to check.")
         state["hallucination_check"] = "grounded"
+        state["node_execution_times"] = {"grade_hallucinations": time.time() - start_time}
         return state
 
     context = "\n\n".join(
@@ -92,4 +95,6 @@ def grade_hallucinations(state: GraphState) -> GraphState:
         logger.warning(f"[HALLUCINATION CHECK] Check failed: {e}. Assuming grounded.")
         state["hallucination_check"] = "grounded"
 
+    state["node_execution_times"] = {"grade_hallucinations": time.time() - start_time}
     return state
+
