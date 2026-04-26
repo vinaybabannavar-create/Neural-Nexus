@@ -3,27 +3,8 @@
 An **Advanced Self-Reflective Retrieval-Augmented Generation** system that autonomously
 evaluates context quality and leverages high-precision reasoning to synthesize answers.
 
-## Architecture
+![Architecture](Neural%20Nexus.png)
 
-```
-User Query
-    │
-    ▼
-Retrieve (ChromaDB / Pinecone)
-    │
-    ▼
-Grade Documents (DeepSeek-R1)
-    │
-    ├─ Relevant ──────────────────► Generate Answer
-    │                                      │
-    └─ Not Relevant                        ▼
-         │                     Grade Hallucinations (DeepSeek-R1)
-         ▼                                 │
-     Web Search (Tavily)        ┌─ Grounded ──► ✅ Final Answer
-         │                      │
-         └──────────────────────┘
-                            └─ Hallucinated ──► Regenerate (up to MAX_RETRIES)
-```
 
 ## Setup
 
