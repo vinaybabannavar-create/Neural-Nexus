@@ -1,0 +1,49 @@
+Introduction to Retrieval-Augmented Generation (RAG)
+
+Retrieval-Augmented Generation (RAG) is an AI framework that combines the strengths
+of large language models with external knowledge retrieval. Instead of relying solely
+on the knowledge encoded during training, RAG systems retrieve relevant documents from
+an external knowledge base at inference time, then use those documents as context
+for generating an answer.
+
+How RAG Works:
+1. The user submits a query.
+2. The query is converted to a vector embedding.
+3. A similarity search is performed against a vector database (e.g. ChromaDB, Pinecone).
+4. The top-K most similar document chunks are retrieved.
+5. The LLM generates an answer using both the query and the retrieved context.
+
+What is Contextual Chunking?
+
+Standard chunking splits documents into fixed-size pieces. The problem is that
+individual chunks often lose their context — a sentence like "This was attributed
+to supply chain issues" means nothing without knowing what "this" refers to.
+
+Contextual chunking solves this by prepending a summary of the entire document
+to each chunk before embedding it. For example:
+
+  [DOCUMENT CONTEXT: This document is an Apple Q3 2024 earnings report discussing
+  a 12% revenue decline due to supply chain disruptions in Asia.]
+
+  "This was attributed to supply chain disruptions in the Asia-Pacific region."
+
+With this context prepended, the embedding now captures the full meaning of the chunk.
+Research suggests contextual chunking improves retrieval accuracy by up to 80%.
+
+What is Corrective RAG?
+
+Corrective RAG (CRAG) extends the standard RAG pipeline by adding a self-evaluation
+step. After retrieving documents, a grader model evaluates whether the retrieved
+context is actually relevant to the question. If the context is insufficient,
+the system automatically triggers a web search to find better information before
+generating an answer.
+
+Key components of Corrective RAG:
+- Retriever: Finds candidate chunks from the vector database.
+- Grader: Evaluates document relevance (often using a reasoning model like DeepSeek-R1).
+- Web Search Fallback: Uses Tavily or Firecrawl when local context is insufficient.
+- Generator: Produces the final answer from verified context.
+- Hallucination Checker: Verifies the answer is grounded in the context documents.
+
+LangGraph is commonly used to implement CRAG because it allows building stateful,
+cyclical agent graphs where the routing between nodes can depend on intermediate results.

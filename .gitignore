@@ -1,0 +1,23 @@
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Vector DB
+chroma_db/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Outputs
+*.log
+# Scratch/Temporary
+scratch/
