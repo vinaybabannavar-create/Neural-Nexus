@@ -1,6 +1,6 @@
 # 🧠 Neural Nexus — Self-Reflective Corrective RAG Pipeline
 
-> **Advanced Self-Reflective Retrieval-Augmented Generation** with a hardened trust & security layer — autonomously evaluates context quality, scores its own confidence, screens for adversarial input, and synthesizes accurate, grounded answers.
+> **Advanced Self-Reflective Retrieval-Augmented Generation** with a hardened trust & security layer — de-contextualizes queries, re-ranks context, grades its own retrieval, verifies its own claims, escalates to human review when it can't be sure, and scores its own trustworthiness.
 
 ![Architecture](Neural%20Nexus.png)
 
@@ -12,68 +12,85 @@
   <img src="https://img.shields.io/badge/ChromaDB-6E56CF?style=for-the-badge&logo=databricks&logoColor=white" />
   <img src="https://img.shields.io/badge/Pinecone-000000?style=for-the-badge&logo=pinecone&logoColor=white" />
   <img src="https://img.shields.io/badge/OpenAI-412991?style=for-the-badge&logo=openai&logoColor=white" />
-  <img src="https://img.shields.io/badge/DeepSeek--R1-4D6BFE?style=for-the-badge&logo=data:image/svg+xml;base64,&logoColor=white" />
+  <img src="https://img.shields.io/badge/DeepSeek--R1-4D6BFE?style=for-the-badge&logoColor=white" />
+  <img src="https://img.shields.io/badge/FlashRank-FF6F00?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/Tavily-00B386?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white" />
+  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" />
 </p>
-
----
-
-## ⚠️ A note on this README
-
-This is the "master" README rewritten to reflect the newest modules in the repo (`confidence_escalator`, `app/security/`, `app/trust/`, `moss_adapter`, `eval_adversarial.py`). I haven't seen the actual code inside those files yet — everything about them below is my best inference from their names, folder placement, and how they'd logically slot into the existing LangGraph pipeline. **Anything under "🛡️ Trust & Security Layer" should be treated as a draft** — tell me what to correct and I'll fix it in place.
 
 ---
 
 ## How It Works
 
-Neural Nexus runs an agentic pipeline built with LangGraph, now extended with a confidence/trust/security layer around the original 5-node Corrective RAG core.
+Neural Nexus runs an 8-node agentic pipeline built with LangGraph. It doesn't just retrieve-and-generate — it rewrites ambiguous follow-ups, re-ranks what it retrieves, grades relevance before answering, checks its own output for hallucination, and escalates to a human when it genuinely can't verify itself.
 
-### Core pipeline
+### Pipeline
 
-1. **Retrieve** — Fetches relevant chunks from the vector store (ChromaDB / Pinecone)
-2. **Grade Documents** — DeepSeek-R1 scores each chunk for relevance; if score < `RELEVANCE_THRESHOLD` (default `0.5`), triggers web search fallback
-3. **Web Search** — Tavily fetches live results when local context is insufficient
-4. **Generate** — LLM synthesizes a grounded answer from verified context
-5. **Hallucination Check** — Verifies every claim is supported by context; regenerates if not (up to `MAX_RETRIES`)
+| # | Node | What it does |
+|---|------|---------------|
+| 0 | **Transform Query** | Rewrites follow-up questions into standalone queries using chat history (skipped on the first message in a conversation). |
+| 1 | **Retrieve** | Pulls top-K candidate chunks from the vector store (ChromaDB / Pinecone). |
+| 1.5 | **Rerank** | Re-orders retrieved chunks with a FlashRank cross-encoder (`ms-marco-TinyBERT-L-2-v2`) and keeps the top 5. Falls back to a no-op if FlashRank isn't installed. |
+| 2 | **Grade Documents** | DeepSeek-R1 scores relevance; below `RELEVANCE_THRESHOLD` (default `0.5`) routes to web search. |
+| 3 | **Web Search** | Tavily fetches live results when local context is insufficient. |
+| 4 | **Generate** | LLM synthesizes a grounded answer from the verified context. |
+| 5 | **Grade Hallucinations** | Checks every claim against context. Grounded → done. Hallucinated with retries left → loops back to Generate. Hallucinated with retries exhausted → escalates. |
+| 6 | **Confidence Escalator** | Handles the case where retries are exhausted and the answer still isn't grounded (see below). |
 
-Each chunk also gets a **document-level summary prepended before embedding** (contextual chunking), which significantly improves retrieval precision.
+Each ingested chunk also gets a **document-level summary prepended before embedding** (contextual chunking) to improve retrieval precision.
 
-### 🛡️ Trust & Security Layer *(new — inferred, please confirm)*
+### 🛡️ Trust & Security Layer
 
-| Module | Inferred Purpose |
-|---|---|
-| `app/nodes/confidence_escalator.py` | Sits after the Hallucination Check node. When the final answer's confidence score falls below a threshold even after retries, it escalates — likely by widening retrieval, switching to a stronger reasoning model, or flagging the response as low-confidence for the caller/UI. |
-| `app/security/ingest_validator.py` | Runs during ingestion, before chunking/embedding. Screens incoming documents for malicious content — prompt-injection payloads, malformed files, or unsafe patterns — before they ever reach the vector store. |
-| `app/security/quarantine_store.py` | Backing store (`quarantine.db`) for documents/chunks flagged by `ingest_validator` — isolates suspicious input instead of discarding or ingesting it outright. |
-| `app/trust/trust_score_engine.py` | Computes a composite trust score for each response, likely combining document relevance grades, hallucination-check results, and retrieval confidence into one number surfaced to the user/API. |
-| `app/trust/latency_tracer.py` | Instruments each node in the graph to trace per-step latency — observability for where time is spent across retrieve → grade → search → generate → check. |
-| `app/utils/moss_adapter.py` | Adapter layer — likely for a MOSS-style similarity/plagiarism-detection service, or a specific model provider named MOSS. **Needs confirmation.** |
-| `tests/eval_adversarial.py` | Adversarial test suite — probing the pipeline with prompt-injection attempts, poisoned documents, or jailbreak-style queries to validate the security layer holds up. |
+**Ingestion-time screening** (`app/security/`) — every document is scanned *before* it's chunked or embedded:
+- `ingest_validator.py` runs a set of risk-weighted regex signatures against incoming text: instruction-override attempts, jailbreak persona hijacking (DAN/god-mode/etc.), safety-guardrail bypass language, chat-template token injection (`<|im_start|>`, `[SYSTEM_PROMPT]`), markdown-based data-exfiltration links, embedded `<script>` tags, and system-prompt leakage requests.
+- Anything that trips a signature is rejected from ingestion and logged to `quarantine_store.py` — a SQLite-backed (`quarantine.db`) audit trail with timestamp, source, reason, risk score, and a content snippet, so security events stay reviewable.
+
+**Response-time confidence handling** (`app/nodes/confidence_escalator.py`) — only fires when hallucination-check retries are exhausted:
+- If a human reviewer has supplied a `manual_context_override`, it's injected as a verified document and the pipeline loops back to Generate with corrected context.
+- Otherwise, instead of returning a possibly-hallucinated answer, the pipeline returns an explicit `⚠️ PENDING_HUMAN_VERIFICATION` notice with the unverified draft attached — it never silently ships an unverified claim.
+
+**Trust scoring** (`app/trust/trust_score_engine.py`) — every response gets a composite 0–100 score:
+- Relevance (max 40 pts, from the document grading score)
+- Groundedness (max 40 pts — full marks if grounded, penalized if hallucinated or flagged for review)
+- Latency efficiency (max 20 pts, based on retrieval speed)
+- Penalties (−5 per retry beyond the first, −15 if flagged pending verification)
+- Maps to a rating: High / Medium / Low Trust, or "Flagged for Verification"
+
+**Latency tracing** (`app/trust/latency_tracer.py`) — provides a `trace_node` decorator and a `get_breakdown_table()` helper to turn per-node execution times into a Streamlit/API-friendly timing table.
+
+**Moss Context Store adapter** (`app/utils/moss_adapter.py`) — a forward-compatible interface for an upcoming "Moss Context Store" retrieval service. Currently wraps the existing Chroma/Pinecone retriever in compatibility mode; the native SDK path is stubbed pending upstream access. *(Not related to plagiarism-detection MOSS — this is a context-retrieval service name.)*
+
+**Adversarial evaluation** (`tests/eval_adversarial.py`) — a dedicated test suite that exercises the security/trust layer against attack-style inputs.
 
 ```mermaid
 flowchart TD
-    A[Ingest Document] --> B[Security: ingest_validator]
-    B -->|flagged| Q[(quarantine.db)]
-    B -->|clean| C[Contextual Chunker]
-    C --> D[(Vector Store: ChromaDB / Pinecone)]
+    subgraph Ingestion
+        ING[Load Document] --> IV[Security: ingest_validator]
+        IV -->|flagged| QDB[(quarantine.db)]
+        IV -->|clean| CC[Contextual Chunker]
+        CC --> VS[(Vector Store: ChromaDB / Pinecone)]
+    end
 
-    U[User Query] --> R[Retrieve]
-    R --> G{Grade Documents<br/>DeepSeek-R1}
-    G -->|low relevance| W[Web Search: Tavily]
-    G -->|relevant| GEN[Generate Answer]
-    W --> GEN
-    GEN --> H{Hallucination Check}
-    H -->|fails, retries left| GEN
-    H -->|passes| TS[Trust Score Engine]
-    H -->|fails, exhausted| CE[Confidence Escalator]
-    CE --> TS
-    TS --> OUT[Final Answer + Trust Score]
+    subgraph Query Pipeline
+        Q[User Question] --> TQ[Transform Query]
+        TQ --> RET[Retrieve]
+        RET --> RR[Rerank: FlashRank]
+        RR --> GD{Grade Documents}
+        GD -->|relevant| GEN[Generate]
+        GD -->|not relevant| WS[Web Search: Tavily]
+        WS --> GEN
+        GEN --> GH{Grade Hallucinations}
+        GH -->|grounded| END([Answer + Trust Score])
+        GH -->|hallucinated, retries left| GEN
+        GH -->|retries exhausted| CE[Confidence Escalator]
+        CE -->|human override| GEN
+        CE -->|no override| PEND([Pending Human Verification])
+    end
 
-    LT[Latency Tracer] -.instruments.-> R
-    LT -.instruments.-> G
-    LT -.instruments.-> GEN
-    LT -.instruments.-> H
+    VS -.context.-> RET
+    GEN -.-> TS[Trust Score Engine]
+    TS --> END
 ```
 
 ---
@@ -84,38 +101,39 @@ flowchart TD
 Neural-Nexus/
 ├── app/
 │   ├── config.py                    # Settings from .env
-│   ├── ingest.py                    # Document ingestion pipeline
+│   ├── ingest.py                    # Load → security validate → chunk → embed → store
 │   ├── api.py                       # FastAPI REST server
 │   ├── ui.py                        # Streamlit chat UI
 │   ├── graph/
 │   │   ├── state.py                 # LangGraph state TypedDict
 │   │   └── pipeline.py              # Graph construction + routing logic
 │   ├── nodes/
-│   │   ├── retrieve.py              # Node 1: Vector DB retrieval
+│   │   ├── transform_query.py       # Node 0: de-contextualize follow-ups
+│   │   ├── retrieve.py              # Node 1: vector DB retrieval
+│   │   ├── rerank.py                # Node 1.5: FlashRank cross-encoder rerank
 │   │   ├── grade_documents.py       # Node 2: DeepSeek-R1 relevance grader
 │   │   ├── web_search.py            # Node 3: Tavily web search fallback
 │   │   ├── generate.py              # Node 4: LLM answer generation
-│   │   ├── grade_hallucinations.py  # Node 5: Hallucination checker
-│   │   └── confidence_escalator.py  # NEW: escalates low-confidence answers
+│   │   ├── grade_hallucinations.py  # Node 5: hallucination checker
+│   │   └── confidence_escalator.py  # Node 6: human-review escalation
 │   ├── security/
-│   │   ├── __init__.py
-│   │   ├── ingest_validator.py      # NEW: screens documents at ingestion
-│   │   └── quarantine_store.py      # NEW: quarantine.db backing store
+│   │   ├── ingest_validator.py      # Prompt-injection / malicious-content screening
+│   │   └── quarantine_store.py      # SQLite quarantine.db audit trail
 │   ├── trust/
-│   │   ├── __init__.py
-│   │   ├── trust_score_engine.py    # NEW: composite trust score
-│   │   └── latency_tracer.py        # NEW: per-node latency tracing
+│   │   ├── trust_score_engine.py    # Composite 0-100 trust score
+│   │   └── latency_tracer.py        # Per-node latency instrumentation
 │   └── utils/
 │       ├── vector_store.py          # ChromaDB / Pinecone abstraction
 │       ├── contextual_chunker.py    # Contextual chunking implementation
 │       ├── llm_factory.py           # LLM provider factory
-│       └── moss_adapter.py          # NEW: adapter (purpose TBC)
+│       └── moss_adapter.py          # Moss Context Store compatibility adapter
 ├── tests/
 │   ├── test_pipeline.py             # Unit tests (no API keys needed)
-│   └── eval_adversarial.py          # NEW: adversarial security eval suite
+│   └── eval_adversarial.py          # Adversarial security/trust eval suite
 ├── docs_sample/
 │   └── sample.txt                   # Sample document to test with
-├── quarantine.db                    # Quarantined/flagged ingestion data
+├── quarantine.db                    # Quarantined ingestion audit log
+├── Dockerfile
 ├── main.py                          # CLI entrypoint
 ├── requirements.txt
 ├── .env.example
@@ -163,7 +181,7 @@ python main.py ingest --source /path/to/your/file.pdf
 python main.py ingest --source https://example.com/article
 ```
 
-Documents flagged by `ingest_validator` during this step are routed to `quarantine.db` instead of the vector store.
+Every document is screened by `ingest_validator` before chunking. Flagged content is rejected and logged to `quarantine.db` instead of reaching the vector store.
 
 ### 4. Ask questions
 
@@ -188,7 +206,7 @@ python main.py ui
 ### 5. Run the adversarial security eval
 
 ```bash
-python -m pytest tests/eval_adversarial.py -v
+pytest tests/eval_adversarial.py -v
 ```
 
 ---
@@ -209,12 +227,3 @@ pytest tests/ -v
 | DeepSeek | Reasoning / grader nodes   | platform.deepseek.com       |
 | Tavily   | Web search fallback        | tavily.com                  |
 | Pinecone | Cloud vector DB (optional) | pinecone.io                 |
-
----
-
-## Roadmap
-
-- [ ] Confirm and document exact behavior of `moss_adapter.py`
-- [ ] Publish trust score methodology (weights/inputs to `trust_score_engine`)
-- [ ] Dashboard for `latency_tracer` output
-- [ ] Expand `eval_adversarial.py` coverage
