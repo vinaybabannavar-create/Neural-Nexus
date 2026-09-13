@@ -17,9 +17,13 @@ def get_generator_llm():
     if settings.LLM_PROVIDER == "groq":
         try:
             from langchain_groq import ChatGroq
+            model = settings.GENERATION_MODEL
+            if not model or "llama" in model:
+                model = "qwen/qwen3.8-27b"
             return ChatGroq(
-                model=settings.GENERATION_MODEL if "llama" in settings.GENERATION_MODEL else "llama-3.1-8b-instant",
+                model=model,
                 temperature=0,
+                max_tokens=400,
                 groq_api_key=settings.GROQ_API_KEY,
             )
         except ImportError:
@@ -34,9 +38,22 @@ def get_generator_llm():
 
 def get_grader_llm():
     """
-    Returns the DeepSeek-R1 reasoning model used for grading.
-    Falls back to gpt-4o-mini if DeepSeek key is missing.
+    Returns the reasoning model used for grading.
+    Uses Groq when LLM_PROVIDER=groq, or DeepSeek if DEEPSEEK_API_KEY is configured.
+    Falls back to OpenAI if available.
     """
+    if settings.LLM_PROVIDER == "groq" and settings.GROQ_API_KEY:
+        from langchain_groq import ChatGroq
+        grader_model = settings.GRADER_MODEL
+        if not grader_model or "deepseek" in grader_model:
+            grader_model = "qwen/qwen3.8-27b"
+        return ChatGroq(
+            model=grader_model,
+            temperature=0,
+            max_tokens=250,
+            groq_api_key=settings.GROQ_API_KEY,
+        )
+
     if settings.DEEPSEEK_API_KEY:
         return ChatOpenAI(
             model=settings.GRADER_MODEL,

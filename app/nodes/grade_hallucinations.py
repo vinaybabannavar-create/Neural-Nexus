@@ -39,7 +39,8 @@ HALLUCINATION_PROMPT = ChatPromptTemplate.from_messages([
             "- Score 'yes' only if all key facts in the answer appear in the context.\n"
             "- Score 'no' if the answer introduces ANY fact, number, name, or claim "
             "  not present in the context.\n"
-            "- Ignore writing style, formatting, and fluency — only check factual grounding."
+            "- Ignore writing style, formatting, and fluency — only check factual grounding.\n"
+            "- Respond with JSON containing 'grounded' ('yes' or 'no') and 'reasoning'."
         ),
     ),
     (
@@ -77,7 +78,10 @@ def grade_hallucinations(state: GraphState) -> GraphState:
     )
 
     grader_llm = get_grader_llm()
-    structured_grader = grader_llm.with_structured_output(HallucinationGrade)
+    try:
+        structured_grader = grader_llm.with_structured_output(HallucinationGrade, method="json_mode")
+    except Exception:
+        structured_grader = grader_llm.with_structured_output(HallucinationGrade)
     chain = HALLUCINATION_PROMPT | structured_grader
 
     try:

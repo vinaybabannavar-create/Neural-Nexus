@@ -8,17 +8,26 @@ from langchain_openai import OpenAIEmbeddings
 from app.config import settings
 
 
+_embeddings_instance = None
+
+
 def get_embeddings():
-    """Return the configured embedding model."""
+    """Return the configured embedding model (cached singleton)."""
+    global _embeddings_instance
+    if _embeddings_instance is not None:
+        return _embeddings_instance
+
     if settings.EMBEDDING_PROVIDER == "huggingface":
         from langchain_huggingface import HuggingFaceEmbeddings
         logger.info(f"Using local HuggingFace embeddings: {settings.EMBEDDING_MODEL}")
-        return HuggingFaceEmbeddings(model_name=settings.EMBEDDING_MODEL)
+        _embeddings_instance = HuggingFaceEmbeddings(model_name=settings.EMBEDDING_MODEL)
+        return _embeddings_instance
 
-    return OpenAIEmbeddings(
+    _embeddings_instance = OpenAIEmbeddings(
         model=settings.EMBEDDING_MODEL,
         openai_api_key=settings.OPENAI_API_KEY,
     )
+    return _embeddings_instance
 
 
 def get_retriever():

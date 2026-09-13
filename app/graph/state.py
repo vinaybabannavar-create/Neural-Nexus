@@ -35,4 +35,9 @@ class GraphState(TypedDict):
     sources: List[str]
     hallucination_check: str
     node_execution_times: Annotated[Dict[str, float], operator.ior]
+    request_id: Optional[str]
+    escalation_status: Optional[str]
+    manual_context_override: Optional[str]
+    trust_score: Optional[float]
+
 

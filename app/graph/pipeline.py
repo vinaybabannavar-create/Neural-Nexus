@@ -48,6 +48,7 @@ from app.nodes.grade_documents import grade_documents
 from app.nodes.web_search import web_search
 from app.nodes.generate import generate
 from app.nodes.grade_hallucinations import grade_hallucinations
+from app.nodes.confidence_escalator import confidence_escalator
 from app.config import settings
 
 
@@ -75,8 +76,8 @@ def decide_after_grading(state: GraphState) -> str:
 
 def decide_after_hallucination_check(state: GraphState) -> str:
     """
-    After hallucination check, decide whether to return the answer
-    or retry generation.
+    After hallucination check, decide whether to return the answer,
+    retry generation, or escalate to confidence_escalator if retries are exhausted.
     """
     check = state.get("hallucination_check", "grounded")
     retry_count = state.get("retry_count", 0)
@@ -85,18 +86,32 @@ def decide_after_hallucination_check(state: GraphState) -> str:
         logger.info("[ROUTER] Answer is grounded → returning to user")
         return "end"
 
-    if retry_count >= settings.MAX_RETRIES:
-        logger.warning(
-            f"[ROUTER] Hallucination detected but max retries ({settings.MAX_RETRIES}) "
-            "reached → returning best available answer"
+    if retry_count < settings.MAX_RETRIES:
+        logger.info(
+            f"[ROUTER] Hallucination detected (retry {retry_count}/{settings.MAX_RETRIES}) "
+            "→ regenerating"
         )
-        return "end"
+        return "regenerate"
 
-    logger.info(
-        f"[ROUTER] Hallucination detected (retry {retry_count}/{settings.MAX_RETRIES}) "
-        "→ regenerating"
+    logger.warning(
+        f"[ROUTER] Hallucination detected and max retries ({settings.MAX_RETRIES}) "
+        "exhausted → escalating to confidence_escalator"
     )
-    return "regenerate"
+    return "confidence_escalator"
+
+
+def decide_after_confidence_escalation(state: GraphState) -> str:
+    """
+    After confidence escalation, route to generate if human override is approved,
+    otherwise end pipeline with pending verification status.
+    """
+    status = state.get("escalation_status")
+    if status == "human_reviewed_approved":
+        logger.info("[ROUTER] Human reviewed and approved → re-generating with corrected context")
+        return "human_reviewed_approved"
+
+    logger.info("[ROUTER] Flagged for human verification → ending pipeline with pending status")
+    return "pending_human_verification"
 
 
 # ── Build the graph ───────────────────────────────────────────
@@ -113,6 +128,7 @@ def build_graph():
     graph.add_node("web_search", web_search)
     graph.add_node("generate", generate)
     graph.add_node("grade_hallucinations", grade_hallucinations)
+    graph.add_node("confidence_escalator", confidence_escalator)
 
     # Entry point
     graph.add_edge(START, "transform_query")
@@ -142,20 +158,30 @@ def build_graph():
     # generate → grade_hallucinations (always)
     graph.add_edge("generate", "grade_hallucinations")
 
-    # grade_hallucinations → END or loop back to generate
+    # grade_hallucinations → END, generate, or confidence_escalator
     graph.add_conditional_edges(
         "grade_hallucinations",
         decide_after_hallucination_check,
         {
             "end": END,
             "regenerate": "generate",
+            "confidence_escalator": "confidence_escalator",
+        },
+    )
+
+    # confidence_escalator → generate (if override approved) or END (pending verification)
+    graph.add_conditional_edges(
+        "confidence_escalator",
+        decide_after_confidence_escalation,
+        {
+            "human_reviewed_approved": "generate",
+            "pending_human_verification": END,
         },
     )
 
     compiled = graph.compile()
-    logger.info("[GRAPH] Corrective RAG pipeline compiled successfully")
+    logger.info("[GRAPH] Corrective RAG pipeline with confidence escalation compiled successfully")
     return compiled
-
 
 
 # Singleton — import this in your app

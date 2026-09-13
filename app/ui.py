@@ -1,432 +1,336 @@
 """
-ui.py — High-Level Premium Streamlit UI for the Corrective RAG pipeline.
+ui.py — Refined Neural Nexus UI with Glassmorphism & Starting Animation.
 """
 import streamlit as st
 from pathlib import Path
-import tempfile
-import shutil
-import base64
-import time
+import tempfile, shutil, base64
+from langchain_core.messages import HumanMessage
 
-# ── Page Config ───────────────────────────────────────────────
-st.set_page_config(
-    page_title="Neural Nexus | Intelligent AI Agent",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="Neural Nexus", page_icon="🧠", layout="wide", initial_sidebar_state="expanded")
 
-# ── Image Helper ──────────────────────────────────────────────
 def get_image_base64(path):
     try:
-        with open(path, "rb") as f:
-            data = f.read()
-        return base64.b64encode(data).decode()
-    except:
-        return ""
+        with open(path, "rb") as f: return base64.b64encode(f.read()).decode()
+    except: return ""
 
-# Try to find the generated logo
+# Logo lookup
 logo_path = list(Path("C:/Users/LENOVO/.gemini/antigravity/brain/5e17c66a-3682-440f-985b-4ca23a46117e/").glob("neural_nexus_logo_*.png"))
-logo_base64 = get_image_base64(logo_path[0]) if logo_path else ""
+if not logo_path and Path("Neural Nexus.png").exists():
+    logo_path = [Path("Neural Nexus.png")]
+logo_b64 = get_image_base64(logo_path[0]) if logo_path else ""
+logo_img = f'<img src="data:image/png;base64,{logo_b64}" width="140" style="border-radius:15px; margin-bottom: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);">' if logo_b64 else '<h1>🧠</h1>'
 
-# ── Custom CSS for Premium Design ──────────────────────────────
 st.markdown(f"""
 <style>
-    /* Global Styles */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
-    
-    html, body, [class*="css"] {{
-        font-family: 'Inter', sans-serif;
-    }}
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
 
-    /* Main Background Gradient */
-    .stApp {{
-        background: radial-gradient(circle at top right, #1a1a2e, #0f0f1a);
-        color: #e0e0e0;
-    }}
+/* --- GLOBAL FONT & BACKGROUND --- */
+html, body, [class*="css"] {{
+    font-family: 'Outfit', sans-serif !important;
+}}
 
-    /* Sidebar Styling */
-    [data-testid="stSidebar"] {{
-        background-color: rgba(15, 15, 26, 0.8);
-        backdrop-filter: blur(20px);
-        border-right: 1px solid rgba(255, 255, 255, 0.05);
-    }}
+.stApp {{
+    background: #090910;
+    background-image: 
+        radial-gradient(circle at 15% 50%, rgba(79, 172, 254, 0.08), transparent 40%),
+        radial-gradient(circle at 85% 30%, rgba(167, 139, 250, 0.08), transparent 40%);
+    color: #e2eaf5;
+}}
 
-    /* Header Styling */
-    .main-header {{
-        background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 800;
-        font-size: 3rem;
-        margin-bottom: 0.5rem;
-    }}
+/* --- STARTING ANIMATION OVERLAY --- */
+.starting-overlay {{
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: #090910;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 999999;
+    animation: fadeOutOverlay 2.5s cubic-bezier(0.8, 0, 0.2, 1) forwards;
+    pointer-events: none;
+}}
 
-    /* Glassmorphism Containers */
-    .glass-card {{
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(10px);
-        border-radius: 20px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 2rem;
-        margin-bottom: 1.5rem;
-    }}
+.starting-logo {{
+    font-size: 4rem;
+    background: linear-gradient(90deg, #4facfe, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 800;
+    animation: scalePulse 1.5s ease-in-out infinite alternate;
+}}
 
-    /* Custom Chat Bubbles */
-    .stChatMessage {{
-        background-color: rgba(255, 255, 255, 0.02) !important;
-        border-radius: 15px !important;
-        border: 1px solid rgba(255, 255, 255, 0.05) !important;
-        margin-bottom: 1rem !important;
-    }}
+.starting-sub {{
+    color: #8fa3b0;
+    font-size: 1.2rem;
+    margin-top: 10px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    animation: slideUpFade 1s ease-out forwards;
+}}
 
-    /* Metric Styling */
-    [data-testid="stMetricValue"] {{
-        color: #00f2fe !important;
-        font-weight: 700 !important;
-    }}
+@keyframes scalePulse {{
+    0% {{ transform: scale(0.95); opacity: 0.8; }}
+    100% {{ transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 20px rgba(79,172,254,0.6)); }}
+}}
 
-    /* Sidebar Logo Header */
-    .sidebar-logo {{
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin-bottom: 2rem;
-    }}
-    
-    /* Buttons */
-    .stButton > button {{
-        background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
-        color: white !important;
-        border: none !important;
-        border-radius: 12px !important;
-        font-weight: 600 !important;
-        transition: all 0.3s ease !important;
-    }}
-    .stButton > button:hover {{
-        transform: translateY(-2px);
-        box-shadow: 0 4px 15px rgba(0, 242, 254, 0.3);
-    }}
+@keyframes slideUpFade {{
+    0% {{ opacity: 0; transform: translateY(20px); }}
+    100% {{ opacity: 1; transform: translateY(0); }}
+}}
 
-    /* Splash Screen Animation */
-    #splash-screen {{
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: #05050a;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        z-index: 999999;
-        animation: fadeOutSplash 1.5s cubic-bezier(0.65, 0, 0.35, 1) forwards;
-        animation-delay: 6s;
-        overflow: hidden;
-    }}
+@keyframes fadeOutOverlay {{
+    0% {{ opacity: 1; }}
+    80% {{ opacity: 1; }}
+    100% {{ opacity: 0; visibility: hidden; }}
+}}
 
-    .splash-content {{
-        position: relative;
-        text-align: center;
-        z-index: 1;
-    }}
+/* --- SIDEBAR STYLING --- */
+[data-testid="stSidebar"] {{
+    background: rgba(15, 15, 25, 0.6) !important;
+    backdrop-filter: blur(20px) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+}}
 
-    .splash-logo {{
-        width: 350px;
-        animation: neonFlicker 3s linear infinite, logoIntro 6s ease-in-out forwards;
-    }}
+/* --- CHAT BUBBLES --- */
+.chat-user {{
+    background: linear-gradient(135deg, rgba(79, 172, 254, 0.15), rgba(167, 139, 250, 0.1));
+    border: 1px solid rgba(79, 172, 254, 0.3);
+    border-radius: 20px 20px 5px 20px;
+    padding: 1.2rem;
+    margin: 1rem 0 1rem auto;
+    max-width: 85%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+}}
 
-    .boot-text {{
-        margin-top: 2rem;
-        font-family: 'Courier New', monospace;
-        color: #00f2fe;
-        font-size: 1rem;
-        letter-spacing: 5px;
-        text-transform: uppercase;
-        animation: blink 0.8s step-end infinite;
-    }}
+.chat-assistant {{
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    border-radius: 20px 20px 20px 5px;
+    padding: 1.2rem;
+    margin: 1rem auto 1rem 0;
+    max-width: 90%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+}}
 
-    @keyframes neonFlicker {{
-        0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {{ opacity: 1; filter: drop-shadow(0 0 15px #00f2fe); }}
-        20%, 22%, 24%, 55% {{ opacity: 0.7; filter: none; }}
-    }}
+/* --- GLASS CARD METRICS --- */
+.glass-card {{
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 15px;
+    padding: 1rem;
+    margin-top: 1rem;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}}
+.glass-metric {{
+    flex: 1;
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.03);
+}}
+.metric-val {{ font-size: 1.4rem; font-weight: 800; color: #4facfe; }}
+.metric-lbl {{ font-size: 0.7rem; color: #8fa3b0; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }}
 
-    @keyframes logoIntro {{
-        0% {{ transform: scale(0.3); opacity: 0; }}
-        15% {{ transform: scale(1.1); opacity: 1; }}
-        80% {{ transform: scale(1); opacity: 1; }}
-        100% {{ transform: scale(5); opacity: 0; }}
-    }}
-
-    @keyframes fadeOutSplash {{
-        from {{ opacity: 1; visibility: visible; }}
-        to {{ opacity: 0; visibility: hidden; }}
-    }}
-
-    @keyframes blink {{
-        50% {{ opacity: 0; }}
-    }}
-
-    /* Quick Question Chips */
-    .question-chip {{
-        display: inline-block;
-        padding: 10px 20px;
-        margin: 5px;
-        border-radius: 50px;
-        background: rgba(0, 242, 254, 0.1);
-        border: 1px solid rgba(0, 242, 254, 0.3);
-        color: #00f2fe;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        font-size: 0.9rem;
-    }}
-    .question-chip:hover {{
-        background: rgba(0, 242, 254, 0.2);
-        border-color: #00f2fe;
-        transform: translateY(-2px);
-    }}
 </style>
+
+<!-- STARTING ANIMATION HTML -->
+<div class="starting-overlay">
+    <div class="starting-logo">Neural Nexus</div>
+    <div class="starting-sub">Initializing C-RAG Engine...</div>
+</div>
 """, unsafe_allow_html=True)
 
-# ── Splash Screen ─────────────────────────────────────────────
-if "splash_shown" not in st.session_state:
-    st.markdown(f'''
-        <div id="splash-screen">
-            <div class="splash-content">
-                <img class="splash-logo" src="data:image/png;base64,{logo_base64}">
-                <div class="boot-text">Initializing Neural Nexus...</div>
-            </div>
-        </div>
-    ''', unsafe_allow_html=True)
-    st.session_state.splash_shown = True
-
-# ── Question Generation Logic ─────────────────────────────────
-def generate_suggested_questions(text: str):
-    from app.utils.llm_factory import get_generator_llm
-    llm = get_generator_llm()
-    prompt = (
-        "Based on the following document excerpt, generate 3 clear, intriguing, "
-        "and specific questions that a user might want to ask about this document. "
-        "Return ONLY a numbered list of 3 questions.\n\n"
-        f"TEXT:\n{text[:4000]}\n\nQUESTIONS:"
-    )
-    try:
-        response = llm.invoke(prompt)
-        questions = [q.split(". ", 1)[-1].strip() for q in response.content.strip().split("\n") if q.strip()]
-        return questions[:3]
-    except Exception as e:
-        return ["What is the main topic of this document?", "Can you summarize the key findings?", "Who are the main entities mentioned?"]
-
-from langchain_core.messages import HumanMessage, AIMessage
-import json
+# ── Session State Init ─────────────────────────────────────────
+if "messages" not in st.session_state: st.session_state.messages = []
+if "langchain_messages" not in st.session_state: st.session_state.langchain_messages = []
+if "suggested_questions" not in st.session_state: st.session_state.suggested_questions = []
 
 # ── Sidebar ──────────────────────────────────────────────────
 with st.sidebar:
-    if logo_base64:
-        st.markdown(f'''
-            <div class="sidebar-logo">
-                <img src="data:image/png;base64,{logo_base64}" width="180" style="border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-            </div>
-        ''', unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:center;'>{logo_img}</div>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align:center; margin-bottom: 2rem;'>Neural Nexus</h3>", unsafe_allow_html=True)
     
-    st.markdown("### 📄 Knowledge Base")
-    tab_file, tab_url = st.tabs(["Upload", "Web URL"])
+    st.markdown("#### 📁 Knowledge Base")
+    tab_file, tab_url = st.tabs(["Upload File", "Web URL"])
 
     with tab_file:
         uploaded = st.file_uploader("", type=["pdf", "txt", "md"], label_visibility="collapsed")
-        if st.button("🚀 Ingest Document", key="ingest_btn", use_container_width=True, disabled=uploaded is None):
+        if st.button("🚀 Ingest Document", use_container_width=True, disabled=uploaded is None):
             from app.ingest import ingest
-            suffix = Path(uploaded.name).suffix
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                shutil.copyfileobj(uploaded, tmp)
-                tmp_path = tmp.name
+            import os
+            tmp_dir = tempfile.mkdtemp()
+            tmp_path = os.path.join(tmp_dir, uploaded.name)
+            with open(tmp_path, "wb") as f:
+                f.write(uploaded.getbuffer())
             
             with st.spinner("Analyzing & indexing..."):
                 try:
-                    # Read sample text for question generation
-                    sample_text = ""
-                    if suffix == ".txt":
-                        with open(tmp_path, "r", encoding="utf-8") as f:
-                            sample_text = f.read(5000)
-                    else:
-                        sample_text = f"A document named {uploaded.name}"
-                    
                     ingest(tmp_path)
-                    st.session_state.suggested_questions = generate_suggested_questions(sample_text)
                     st.session_state.last_ingested = uploaded.name
-                    st.success(f"Verified: {uploaded.name}")
+                    st.session_state.suggested_questions = [
+                        f"What are the main points in {uploaded.name}?",
+                        f"Can you summarize the key findings of {uploaded.name}?",
+                        f"What is the context of {uploaded.name}?"
+                    ]
+                    st.success(f"Verified & Indexed: {uploaded.name}")
                 except Exception as e:
                     st.error(f"Error: {e}")
                 finally:
-                    Path(tmp_path).unlink(missing_ok=True)
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
 
     with tab_url:
-        url = st.text_input("Source URL", key="url_input")
-        if st.button("🌐 Ingest URL", key="url_btn", use_container_width=True, disabled=not url):
+        url = st.text_input("Source URL")
+        if st.button("🌐 Ingest URL", use_container_width=True, disabled=not url):
             from app.ingest import ingest
             with st.spinner("Reading URL..."):
                 try:
                     ingest(url)
-                    st.session_state.suggested_questions = generate_suggested_questions(f"Web content from {url}")
                     st.session_state.last_ingested = url
+                    st.session_state.suggested_questions = [
+                        "What is this website about?",
+                        "Summarize the key takeaways from the page.",
+                        "Who is the author or organization behind this?"
+                    ]
                     st.success("Verified Source")
                 except Exception as e:
                     st.error(f"Error: {e}")
 
     st.divider()
-    st.markdown("### ⚙️ Engine Settings")
+    st.markdown("#### ⚙️ Settings")
     show_debug = st.checkbox("Show Performance Metrics", value=True)
-    
-    # Export Chat
-    if "messages" in st.session_state and st.session_state.messages:
-        chat_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
-        st.download_button(
-            label="💾 Export Chat (MD)",
-            data=chat_text,
-            file_name="neural_nexus_chat.md",
-            mime="text/markdown",
-            use_container_width=True
-        )
     
     if st.button("🗑️ Clear Conversation", use_container_width=True):
         st.session_state.messages = []
         st.session_state.langchain_messages = []
         st.rerun()
-
-    st.info("Active Provider: **Groq + DeepSeek + FlashRank**")
+        
+    st.markdown("<br><p style='font-size:0.8rem; color: gray; text-align:center;'>Powered by Groq & DeepSeek</p>", unsafe_allow_html=True)
 
 # ── Main Content ──────────────────────────────────────────────
-st.markdown("<div class='main-header'>Neural Nexus</div>", unsafe_allow_html=True)
-st.markdown("<p style='font-size: 1.2rem; opacity: 0.8; margin-top: -1rem; margin-bottom: 2rem; color: #4facfe;'>Advanced Self-Reflective Intelligence for Precise Insights</p>", unsafe_allow_html=True)
+st.markdown("<h1 style='font-weight:800; font-size: 2.5rem; margin-bottom: 0;'>Neural Nexus <span style='font-size:1rem; color:#4facfe; border: 1px solid #4facfe; padding: 2px 8px; border-radius: 12px; vertical-align: middle;'>C-RAG v2</span></h1>", unsafe_allow_html=True)
+st.markdown("<p style='font-size: 1.1rem; opacity: 0.7; margin-top: 0; margin-bottom: 2rem;'>Advanced Self-Reflective Retrieval Augmented Generation</p>", unsafe_allow_html=True)
 
-# Suggested Questions Section
-if "suggested_questions" in st.session_state and st.session_state.suggested_questions:
-    st.markdown("<div style='margin-top: 2rem; margin-bottom: 1rem;'>", unsafe_allow_html=True)
-    st.markdown(f"<p style='font-size: 0.9rem; opacity: 0.6; margin-left: 5px;'>✨ INSIGHTS FOR: <b>{st.session_state.get('last_ingested', 'Document')}</b></p>", unsafe_allow_html=True)
-    
-    q_cols = st.columns(len(st.session_state.suggested_questions))
+# Suggested Questions
+if st.session_state.suggested_questions:
+    st.markdown(f"<p style='font-size: 0.85rem; opacity: 0.6; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;'>✨ Suggested for: <b>{st.session_state.get('last_ingested', 'Document')}</b></p>", unsafe_allow_html=True)
+    cols = st.columns(len(st.session_state.suggested_questions))
     for i, q in enumerate(st.session_state.suggested_questions):
-        display_q = q if len(q) < 60 else q[:57] + "..."
-        if q_cols[i].button(f"🔍 {display_q}", key=f"sq_{i}", use_container_width=True, help=q):
+        display_q = q if len(q) < 50 else q[:47] + "..."
+        if cols[i].button(display_q, key=f"sq_{i}", use_container_width=True, help=q):
             st.session_state.pending_question = q
-    st.markdown("</div>", unsafe_allow_html=True)
+
+st.divider()
 
 # ── Chat Interface ────────────────────────────────────────────
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "langchain_messages" not in st.session_state:
-    st.session_state.langchain_messages = []
-
 chat_container = st.container()
 
 with chat_container:
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            if msg["role"] == "assistant" and show_debug and "meta" in msg:
-                with st.expander("Engine Analytics & Latency"):
-                    m = msg["meta"]
-                    cols = st.columns(len(m.get("latencies", {})) or 1)
-                    for i, (node, duration) in enumerate(m.get("latencies", {}).items()):
-                        cols[i % len(cols)].metric(node.replace("_", " ").title(), f"{duration:.2f}s")
-                    
-                    if "docs" in msg:
-                        st.divider()
-                        st.markdown("**Retrieved Context Preview:**")
-                        for i, doc in enumerate(msg["docs"]):
-                            with st.expander(f"📄 Chunk {i+1} | Score: {doc.get('score', 'N/A')}"):
-                                st.code(doc["content"])
+        if msg["role"] == "user":
+            st.markdown(f"<div class='chat-user'>{msg['content']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='chat-assistant'>{msg['content']}</div>", unsafe_allow_html=True)
+            if show_debug and "meta" in msg:
+                m = msg["meta"]
+                lat_str = f"{sum(m.get('latencies', {}).values()):.2f}s" if m.get("latencies") else "—"
+                meth_str = "🌐 Web Search" if m.get("web_search_used") else "📚 Vector DB"
+                rel_str = f"{m.get('relevance_score', 0):.0%}"
+                trust_val = m.get("trust_score", 100.0)
+                trust_rating = m.get("trust_rating", "High Trust")
+                escalation = m.get("escalation_status")
+                
+                status_badge = f"<span style='color:#ff5252; font-weight:bold;'>⚠️ ESCALATED</span>" if escalation == "pending_human_verification" else f"<span style='color:#00f5a0;'>✓ {trust_rating}</span>"
+                
+                st.markdown(f'''
+                <div class='glass-card'>
+                    <div class='glass-metric'><div class='metric-val'>{rel_str}</div><div class='metric-lbl'>Relevance</div></div>
+                    <div class='glass-metric'><div class='metric-val' style='color:#00f5a0;'>{trust_val:.0f}/100</div><div class='metric-lbl'>Trust Index</div></div>
+                    <div class='glass-metric'><div class='metric-val' style='color:#a78bfa;'>{meth_str}</div><div class='metric-lbl'>Source</div></div>
+                    <div class='glass-metric'><div class='metric-val' style='color:#ffbd2e;'>{lat_str}</div><div class='metric-lbl'>Latency</div></div>
+                </div>
+                ''', unsafe_allow_html=True)
+                
+                with st.expander("📊 Latency & Security Telemetry"):
+                    from app.trust.latency_tracer import LatencyTracer
+                    breakdown_data = LatencyTracer.get_breakdown_table(m.get("latencies", {}))
+                    if breakdown_data:
+                        st.markdown("**Per-Stage Execution Breakdown:**")
+                        st.table(breakdown_data)
+                    st.markdown(f"**Escalation Status:** `{escalation or 'Normal Resolution'}` | **Trust Rating:** {status_badge}", unsafe_allow_html=True)
 
-# Handle pending question from suggested chips
+                if m.get("sources"):
+                    with st.expander("📎 Verified Sources"):
+                        for src in m["sources"]:
+                            st.markdown(f"- `{src}`")
+
 if "pending_question" in st.session_state:
     question = st.session_state.pop("pending_question")
 else:
-    question = st.chat_input("Ask the agent anything...")
+    question = st.chat_input("Ask Neural Nexus anything...")
 
 if question:
-    # Display user message
+    # Append user question
     st.session_state.messages.append({"role": "user", "content": question})
     st.session_state.langchain_messages.append(HumanMessage(content=question))
     
     with chat_container:
-        with st.chat_message("user"):
-            st.markdown(question)
-
-    # Run pipeline
-    with chat_container:
-        with st.chat_message("assistant"):
-            answer_placeholder = st.empty()
+        st.markdown(f"<div class='chat-user'>{question}</div>", unsafe_allow_html=True)
+        
+        with st.spinner("Analyzing context and generating response..."):
+            from app.graph.pipeline import rag_graph
+            from app.trust.trust_score_engine import trust_engine
+            import uuid
             
-            with st.spinner("Analyzing context and generating response..."):
-                from app.graph.pipeline import rag_graph
+            req_id = f"ui_{uuid.uuid4().hex[:10]}"
+            initial_state = {
+                "question": question,
+                "messages": st.session_state.langchain_messages,
+                "documents": [],
+                "generation": None,
+                "web_search_used": False,
+                "retry_count": 0,
+                "relevance_score": 0.0,
+                "sources": [],
+                "hallucination_check": "grounded",
+                "node_execution_times": {},
+                "request_id": req_id,
+                "escalation_status": None,
+                "manual_context_override": None,
+            }
 
-                initial_state = {
-                    "question": question,
-                    "messages": st.session_state.langchain_messages,
-                    "documents": [],
-                    "generation": None,
-                    "web_search_used": False,
-                    "retry_count": 0,
-                    "relevance_score": 0.0,
-                    "sources": [],
-                    "hallucination_check": "grounded",
-                    "node_execution_times": {}
+            try:
+                result = rag_graph.invoke(initial_state)
+                answer = result.get("generation", "No answer generated.")
+                st.session_state.langchain_messages = result.get("messages", st.session_state.langchain_messages)
+                
+                trust_breakdown = trust_engine.record(req_id, result).breakdown
+                
+                meta = {
+                    "web_search_used": result.get("web_search_used", False),
+                    "relevance_score": result.get("relevance_score", 0.0),
+                    "retry_count": result.get("retry_count", 0),
+                    "sources": result.get("sources", []),
+                    "latencies": result.get("node_execution_times", {}),
+                    "trust_score": trust_breakdown.composite_score,
+                    "trust_rating": trust_breakdown.rating,
+                    "escalation_status": result.get("escalation_status"),
                 }
-
-                try:
-                    result = rag_graph.invoke(initial_state)
-                    answer = result.get("generation", "No answer generated.")
-                    sources = result.get("sources", [])
-                    web_used = result.get("web_search_used", False)
-                    relevance = result.get("relevance_score", 0.0)
-                    retries = result.get("retry_count", 1)
-                    latencies = result.get("node_execution_times", {})
-                    docs = [
-                        {"content": d.page_content, "score": d.metadata.get("relevance_score", "N/A")} 
-                        for d in result.get("documents", [])
-                    ]
-
-                    # Update history with the ACTUAL result from the graph (which has the AIMessage)
-                    st.session_state.langchain_messages = result.get("messages", st.session_state.langchain_messages)
-
-                    # Display answer
-                    answer_placeholder.markdown(answer)
-
-                    # Metadata badges in a glass card
-                    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-                    m_cols = st.columns(3)
-                    m_cols[0].metric("Relevance", f"{relevance:.0%}")
-                    m_cols[1].metric("Method", "🌐 Web Search" if web_used else "📚 Vector DB")
-                    m_cols[2].metric("Total Latency", f"{sum(latencies.values()):.2f}s")
-                    
-                    if sources:
-                        with st.expander("📎 Verified Sources"):
-                            for src in sources:
-                                st.markdown(f"- `{src}`")
-                    st.markdown("</div>", unsafe_allow_html=True)
-
-                    meta = {
-                        "web_search_used": web_used,
-                        "relevance_score": relevance,
-                        "retry_count": retries,
-                        "sources": sources,
-                        "latencies": latencies
-                    }
-
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "meta": meta,
-                        "docs": docs
-                    })
-
-                except Exception as e:
-                    error_msg = f"Pipeline Error: {e}"
-                    answer_placeholder.error(error_msg)
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": error_msg,
-                    })
+                
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": answer,
+                    "meta": meta
+                })
+            except Exception as e:
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"Pipeline Error: {e}",
+                    "meta": {}
+                })
+    
     st.rerun()
-

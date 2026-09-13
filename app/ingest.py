@@ -23,6 +23,7 @@ from langchain_community.document_loaders import (
 from langchain_core.documents import Document
 from app.utils.contextual_chunker import contextual_chunk
 from app.utils.vector_store import get_vectorstore_for_ingestion
+from app.security.ingest_validator import validate_document
 
 
 def load_source(source: str) -> list[Document]:
@@ -60,7 +61,7 @@ def load_source(source: str) -> list[Document]:
 
 
 def ingest(source: str):
-    """Full ingestion pipeline: load → contextual chunk → embed → store."""
+    """Full ingestion pipeline: load → security validate → contextual chunk → embed → store."""
     logger.info(f"Starting ingestion for: {source}")
 
     # 1. Load raw documents
@@ -71,11 +72,27 @@ def ingest(source: str):
 
     logger.info(f"Loaded {len(raw_docs)} raw document pages/sections")
 
-    # 2. Apply contextual chunking
-    chunks = contextual_chunk(raw_docs)
+    # 2. Security validation screening
+    safe_docs = []
+    for doc in raw_docs:
+        doc_src = doc.metadata.get("source", source)
+        validation = validate_document(doc.page_content, source=doc_src, auto_quarantine=True)
+        if validation.is_valid:
+            safe_docs.append(doc)
+        else:
+            logger.warning(f"[SECURITY] Quarantined document from '{doc_src}': {validation.reason}")
+
+    if not safe_docs:
+        logger.error("[SECURITY] All loaded documents were quarantined due to security violations. Ingestion aborted.")
+        return
+
+    logger.info(f"Security screening accepted {len(safe_docs)}/{len(raw_docs)} document sections")
+
+    # 3. Apply contextual chunking
+    chunks = contextual_chunk(safe_docs)
     logger.info(f"Created {len(chunks)} contextual chunks")
 
-    # 3. Embed and store
+    # 4. Embed and store
     vectorstore = get_vectorstore_for_ingestion()
     vectorstore.add_documents(chunks)
     logger.info(f"Stored {len(chunks)} chunks in vector store ✓")
