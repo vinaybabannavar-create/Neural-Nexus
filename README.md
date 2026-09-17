@@ -5,18 +5,17 @@
 ![Architecture](Neural%20Nexus.png)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/Next.js-14+-000000?style=for-the-badge&logo=next.js&logoColor=white" />
+  <img src="https://img.shields.io/badge/LiveKit-Voice_Agent-00D1B2?style=for-the-badge&logo=livekit&logoColor=white" />
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
+  <img src="https://img.shields.io/badge/TailwindCSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" />
   <img src="https://img.shields.io/badge/LangGraph-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" />
   <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
-  <img src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" />
+  <img src="https://img.shields.io/badge/Groq-F05A28?style=for-the-badge&logo=groq&logoColor=white" />
   <img src="https://img.shields.io/badge/ChromaDB-6E56CF?style=for-the-badge&logo=databricks&logoColor=white" />
-  <img src="https://img.shields.io/badge/Pinecone-000000?style=for-the-badge&logo=pinecone&logoColor=white" />
-  <img src="https://img.shields.io/badge/OpenAI-412991?style=for-the-badge&logo=openai&logoColor=white" />
-  <img src="https://img.shields.io/badge/DeepSeek--R1-4D6BFE?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/FlashRank-FF6F00?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/Tavily-00B386?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white" />
-  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" />
 </p>
 
 ---
@@ -191,22 +190,42 @@ python main.py query "What is contextual chunking?"
 python main.py query "How does corrective RAG differ from standard RAG?"
 ```
 
-**FastAPI server:**
+**Next.js 14+ Enterprise UI (Primary Frontend):**
 ```bash
-python main.py serve
-# Interactive API docs → http://localhost:8000/docs
+cd frontend
+npm install
+npm run dev
+# Opens browser → http://localhost:3000
 ```
 
-**Streamlit UI:**
+**FastAPI Backend & LiveKit API:**
+```bash
+python -m uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
+# Interactive API docs & Swagger → http://localhost:8000/docs
+# LiveKit Room Token Generator → POST /voice/livekit/token
+# Quarantine Audit Log → GET /security/quarantine
+```
+
+**Legacy Streamlit UI (Alternative Dev View):**
 ```bash
 python main.py ui
 # Opens browser → http://localhost:8501
 ```
 
-### 5. Run the adversarial security eval
+### 5. Compliance & Security Documentation
+
+- **CRISPE Prompts**: [`docs/CRISPE_PROMPTS.md`](docs/CRISPE_PROMPTS.md) (All 5 node prompts in Capacity, Role, Insight, Statement, Personality, Experiment format)
+- **Security Specification**: [`docs/SECURITY_SPEC.md`](docs/SECURITY_SPEC.md) (OWASP Top 10 for LLMs threat matrix & implementation audit)
+- **Traceability Matrix**: [`docs/TRACEABILITY_MATRIX.md`](docs/TRACEABILITY_MATRIX.md) (PRD 5.1–5.4 traceability mapping to source code and tests)
+
+### 6. Run the Test Suites
 
 ```bash
-pytest tests/eval_adversarial.py -v
+# Automated pipeline unit tests (17 passed)
+pytest tests/test_pipeline.py -v
+
+# Adversarial security evaluation suite (16 test scenarios)
+python -m pytest tests/eval_adversarial.py -v
 ```
 
 ---
