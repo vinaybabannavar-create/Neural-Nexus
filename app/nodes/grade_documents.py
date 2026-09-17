@@ -75,6 +75,15 @@ def grade_documents(state: GraphState) -> GraphState:
             "node_execution_times": {"grade_documents": time.time() - start_time}
         }
 
+    if any(doc.metadata.get("source") == "system:neural_nexus_assistant" for doc in chunks_to_grade):
+        logger.info("[GRADE] System overview document detected for conversational query → marked relevant (score: 1.0)")
+        return {
+            **state,
+            "documents": chunks_to_grade,
+            "relevance_score": 1.0,
+            "node_execution_times": {"grade_documents": time.time() - start_time}
+        }
+
     BATCH_GRADE_PROMPT = ChatPromptTemplate.from_messages([
         (
             "system",

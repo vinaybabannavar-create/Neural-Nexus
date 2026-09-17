@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect, useRef } from "react";
 import { 
@@ -12,12 +12,13 @@ import {
   Database, 
   Clock, 
   Layers, 
-  CheckCircle2, 
   AlertTriangle,
   FileText,
-  Link2,
+  UploadCloud,
+  File,
+  X,
   RefreshCw,
-  Terminal,
+  Sparkles,
   Volume2
 } from "lucide-react";
 
@@ -51,21 +52,27 @@ export default function Home() {
     {
       id: "welcome",
       role: "assistant",
-      content: "Hello! I am **Neural Nexus C-RAG v2**.\n\nAsk me anything or ingest documents/URLs in the left panel. I continuously verify factual grounding, calculate real-time Trust Scores, and provide per-node latency telemetry.",
+      content: "Hello! I am **Neural Nexus C-RAG v2**.\n\nUpload a document (PDF, TXT, MD) or enter a web URL on the left, then ask me anything. I verify factual grounding with zero hallucinations, track real-time Trust Scores, and display per-node execution telemetry.",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"chat" | "quarantine" | "metrics">("chat");
   const [voiceMode, setVoiceMode] = useState(false);
+  
+  // Knowledge Ingestion State
+  const [ingestType, setIngestType] = useState<"file" | "url">("file");
+  const [selectedFile, setSelectedFile] = useState<globalThis.File | null>(null);
   const [ingestUrl, setIngestUrl] = useState("");
   const [ingesting, setIngesting] = useState(false);
-  const [ingestMessage, setIngestMessage] = useState<string | null>(null);
+  const [ingestMessage, setIngestMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
+
   const [quarantineLogs, setQuarantineLogs] = useState<QuarantineItem[]>([]);
   const [selectedMeta, setSelectedMeta] = useState<any>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -83,24 +90,22 @@ export default function Home() {
         setQuarantineLogs(data.records || []);
       }
     } catch (e) {
-      console.log("Quarantine store fetch error (FastAPI may be offline):", e);
+      console.log("Quarantine store fetch error:", e);
     }
   };
 
-  const handleSend = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!input.trim() || loading) return;
+  const handleSend = async (queryText?: string) => {
+    const textToSend = (queryText || input).trim();
+    if (!textToSend || loading) return;
 
-    const userText = input.trim();
     const userMsgId = `user_${Date.now()}`;
-    const newMsg: Message = { id: userMsgId, role: "user", content: userText };
+    const newMsg: Message = { id: userMsgId, role: "user", content: textToSend };
 
     setMessages((prev) => [...prev, newMsg]);
-    setInput("");
+    if (!queryText) setInput("");
     setLoading(true);
 
     try {
-      // Connect to FastAPI REST / Query
       const history = messages
         .filter((m) => m.id !== "welcome")
         .map((m) => ({ role: m.role, content: m.content }));
@@ -109,7 +114,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: userText,
+          question: textToSend,
           history: history,
         }),
       });
@@ -148,6 +153,57 @@ export default function Home() {
     }
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+      setIngestMessage(null);
+    }
+  };
+
+  const handleIngestFile = async () => {
+    if (!selectedFile) return;
+    setIngesting(true);
+    setIngestMessage(null);
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+
+    try {
+      const res = await fetch("http://localhost:8000/ingest/file", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        setIngestMessage({
+          type: "success",
+          text: `✓ Verified & Indexed: ${selectedFile.name}`,
+        });
+        setSuggestedQuestions([
+          `What are the main points in ${selectedFile.name}?`,
+          `Can you summarize the key findings of ${selectedFile.name}?`,
+          `What is the context and architecture in ${selectedFile.name}?`,
+        ]);
+        setSelectedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        fetchQuarantineLogs();
+      } else {
+        const err = await res.json();
+        setIngestMessage({
+          type: "error",
+          text: `✗ Ingestion rejected: ${err.detail || "Security check failed"}`,
+        });
+      }
+    } catch (e: any) {
+      setIngestMessage({
+        type: "error",
+        text: `✗ Upload failed: ${e.message}`,
+      });
+    } finally {
+      setIngesting(false);
+    }
+  };
+
   const handleIngestUrl = async () => {
     if (!ingestUrl.trim()) return;
     setIngesting(true);
@@ -159,15 +215,30 @@ export default function Home() {
         body: JSON.stringify({ url: ingestUrl.trim() }),
       });
       if (res.ok) {
-        setIngestMessage(`✓ Successfully indexed: ${ingestUrl}`);
+        const domainOrName = ingestUrl.split("://").pop()?.replace(/\/$/, "") || ingestUrl;
+        setIngestMessage({
+          type: "success",
+          text: `✓ Verified Source: ${domainOrName}`,
+        });
+        setSuggestedQuestions([
+          `What is ${domainOrName} about and what are its key features?`,
+          `Summarize the main content from ${domainOrName}`,
+          `What technologies or key concepts are mentioned in ${domainOrName}?`,
+        ]);
         setIngestUrl("");
         fetchQuarantineLogs();
       } else {
         const err = await res.json();
-        setIngestMessage(`✗ Ingestion failed: ${err.detail || "Violation detected"}`);
+        setIngestMessage({
+          type: "error",
+          text: `✗ Ingestion failed: ${err.detail || "Security perimeter violation"}`,
+        });
       }
     } catch (e: any) {
-      setIngestMessage(`✗ Error connecting to ingestion service: ${e.message}`);
+      setIngestMessage({
+        type: "error",
+        text: `✗ Connection error: ${e.message}`,
+      });
     } finally {
       setIngesting(false);
     }
@@ -175,7 +246,6 @@ export default function Home() {
 
   const toggleVoiceMode = async () => {
     if (!voiceMode) {
-      // Connect to LiveKit token endpoint
       try {
         const res = await fetch("http://localhost:8000/voice/livekit/token", {
           method: "POST",
@@ -190,7 +260,7 @@ export default function Home() {
           console.log("[LiveKit] Acquired room token:", tokenData);
           setVoiceMode(true);
         } else {
-          setVoiceMode(true); // fallback mode
+          setVoiceMode(true);
         }
       } catch (e) {
         setVoiceMode(true);
@@ -202,9 +272,9 @@ export default function Home() {
 
   return (
     <main className="flex h-screen w-screen overflow-hidden">
-      {/* ── LEFT SIDEBAR ────────────────────────────────── */}
-      <aside className="w-80 glass-panel flex flex-col justify-between p-5 border-r border-glassBorder z-10">
-        <div className="flex flex-col gap-6">
+      {/* ── LEFT SIDEBAR ──────────────────────────────────────── */}
+      <aside className="w-84 glass-panel flex flex-col justify-between p-5 border-r border-glassBorder z-10">
+        <div className="flex flex-col gap-5 overflow-y-auto">
           {/* Brand */}
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-accent to-accentPurple flex items-center justify-center text-xl shadow-lg shadow-accent/20">
@@ -250,39 +320,142 @@ export default function Home() {
           </div>
 
           {/* Knowledge Ingestion */}
-          <div className="flex flex-col gap-3">
-            <label className="text-xs uppercase tracking-wider text-slate-400 font-semibold flex items-center gap-1.5">
-              <Database size={13} className="text-accent" /> Knowledge Ingest
-            </label>
-            <div className="flex flex-col gap-2">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="https://example.com/doc"
-                  value={ingestUrl}
-                  onChange={(e) => setIngestUrl(e.target.value)}
-                  className="w-full bg-surface border border-glassBorder rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent"
-                />
+          <div className="glass-card p-4 rounded-xl border border-glassBorder flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs uppercase tracking-wider text-slate-300 font-semibold flex items-center gap-1.5">
+                <Database size={13} className="text-accent" /> Knowledge Base
+              </label>
+              <div className="flex bg-surface rounded-lg p-0.5 border border-glassBorder text-[11px]">
+                <button
+                  onClick={() => setIngestType("file")}
+                  className={`px-2 py-0.5 rounded font-medium transition-all ${
+                    ingestType === "file" ? "bg-accent/20 text-accent" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  File
+                </button>
+                <button
+                  onClick={() => setIngestType("url")}
+                  className={`px-2 py-0.5 rounded font-medium transition-all ${
+                    ingestType === "url" ? "bg-accent/20 text-accent" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  URL
+                </button>
               </div>
-              <button
-                onClick={handleIngestUrl}
-                disabled={ingesting || !ingestUrl.trim()}
-                className="w-full bg-surfaceHover hover:bg-accent/20 border border-glassBorder text-accent hover:border-accent/40 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-              >
-                {ingesting ? <RefreshCw size={13} className="animate-spin" /> : <Globe size={13} />}
-                Ingest URL
-              </button>
-              {ingestMessage && (
-                <p className={`text-[11px] mt-1 ${ingestMessage.startsWith("✓") ? "text-trustGreen" : "text-trustRed"}`}>
-                  {ingestMessage}
-                </p>
-              )}
             </div>
+
+            {/* Ingest Mode: File Upload */}
+            {ingestType === "file" && (
+              <div className="flex flex-col gap-2.5">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  accept=".pdf,.txt,.md"
+                  className="hidden"
+                  id="doc-upload"
+                />
+
+                {!selectedFile ? (
+                  <label
+                    htmlFor="doc-upload"
+                    className="border-2 border-dashed border-glassBorder hover:border-accent/50 rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 cursor-pointer bg-surface/50 hover:bg-surface transition-all group"
+                  >
+                    <UploadCloud size={22} className="text-slate-400 group-hover:text-accent transition-colors" />
+                    <span className="text-xs font-medium text-slate-300">Select Document</span>
+                    <span className="text-[10px] text-slate-500">PDF, TXT, Markdown (up to 20MB)</span>
+                  </label>
+                ) : (
+                  <div className="bg-surface border border-glassBorder rounded-lg p-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <File size={16} className="text-accent flex-shrink-0" />
+                      <div className="flex flex-col overflow-hidden">
+                        <span className="text-xs font-medium text-slate-200 truncate">{selectedFile.name}</span>
+                        <span className="text-[10px] text-slate-500">{(selectedFile.size / 1024).toFixed(0)} KB</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedFile(null);
+                        if (fileInputRef.current) fileInputRef.current.value = "";
+                      }}
+                      className="text-slate-400 hover:text-white p-1"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleIngestFile}
+                  disabled={ingesting || !selectedFile}
+                  className="w-full bg-gradient-to-r from-accent to-accentPurple hover:opacity-90 text-white py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-accent/10"
+                >
+                  {ingesting ? <RefreshCw size={13} className="animate-spin" /> : <FileText size={13} />}
+                  {ingesting ? "Indexing Document..." : "🚀 Ingest Document"}
+                </button>
+              </div>
+            )}
+
+            {/* Ingest Mode: URL */}
+            {ingestType === "url" && (
+              <div className="flex flex-col gap-2">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="https://example.com/doc"
+                    value={ingestUrl}
+                    onChange={(e) => setIngestUrl(e.target.value)}
+                    className="w-full bg-surface border border-glassBorder rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <button
+                  onClick={handleIngestUrl}
+                  disabled={ingesting || !ingestUrl.trim()}
+                  className="w-full bg-surfaceHover hover:bg-accent/20 border border-glassBorder text-accent hover:border-accent/40 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-40 shadow-sm"
+                >
+                  {ingesting ? <RefreshCw size={13} className="animate-spin" /> : <Globe size={13} />}
+                  {ingesting ? "Analyzing URL..." : "🌐 Ingest URL"}
+                </button>
+              </div>
+            )}
+
+            {/* Ingest Status Feedback */}
+            {ingestMessage && (
+              <div className={`text-[11px] p-2 rounded-lg border ${
+                ingestMessage.type === "success"
+                  ? "bg-trustGreen/10 border-trustGreen/30 text-trustGreen"
+                  : "bg-trustRed/10 border-trustRed/30 text-trustRed"
+              }`}>
+                {ingestMessage.text}
+              </div>
+            )}
           </div>
+
+          {/* Suggested Questions (Generated after ingest) */}
+          {suggestedQuestions.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                <Sparkles size={12} className="text-trustYellow" /> Suggested Queries
+              </span>
+              <div className="flex flex-col gap-1.5">
+                {suggestedQuestions.map((q, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSend(q)}
+                    className="text-left text-xs bg-surface/70 hover:bg-surface border border-glassBorder hover:border-accent/40 rounded-lg p-2 text-slate-300 hover:text-white transition-all leading-snug"
+                  >
+                    💡 {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* LiveKit Voice Mode Card */}
-        <div className="glass-card p-4 rounded-xl flex flex-col gap-3">
+        <div className="glass-card p-4 rounded-xl flex flex-col gap-3 mt-4 border border-glassBorder">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Volume2 size={16} className={voiceMode ? "text-trustGreen animate-pulse" : "text-slate-400"} />
@@ -308,7 +481,7 @@ export default function Home() {
         </div>
       </aside>
 
-      {/* ── MAIN CONTENT AREA ────────────────────────────── */}
+      {/* ── MAIN CONTENT AREA ─────────────────────────────────── */}
       <section className="flex-1 flex flex-col h-full overflow-hidden bg-background">
         {/* Header */}
         <header className="h-16 glass-panel border-b border-glassBorder flex items-center justify-between px-6 z-10">
@@ -393,7 +566,7 @@ export default function Home() {
 
             {/* Input Bar */}
             <div className="p-4 glass-panel border-t border-glassBorder">
-              <form onSubmit={handleSend} className="flex gap-2 max-w-4xl mx-auto">
+              <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex gap-2 max-w-4xl mx-auto">
                 <input
                   type="text"
                   placeholder="Ask Neural Nexus anything (e.g. 'What is contextual chunking?')..."

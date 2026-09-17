@@ -21,3 +21,6 @@ Thumbs.db
 *.log
 # Scratch/Temporary
 scratch/
+
+frontend/node_modules/
+frontend/.next/
