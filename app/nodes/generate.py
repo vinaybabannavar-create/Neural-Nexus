@@ -46,12 +46,12 @@ GENERATE_PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 
-def _format_context(documents) -> str:
-    """Combine document chunks into a single context string."""
+def _format_context(documents, max_chunks: int = 3, max_chars: int = 800) -> str:
+    """Combine top document chunks into a single context string within token budget."""
     parts = []
-    for i, doc in enumerate(documents, 1):
+    for i, doc in enumerate(documents[:max_chunks], 1):
         source = doc.metadata.get("source", "unknown")
-        parts.append(f"[Doc {i} | Source: {source}]\n{doc.page_content}")
+        parts.append(f"[Doc {i} | Source: {source}]\n{doc.page_content[:max_chars].strip()}")
     return "\n\n---\n\n".join(parts)
 
 
@@ -86,8 +86,15 @@ def generate(state: GraphState) -> GraphState:
     llm = get_generator_llm()
     chain = GENERATE_PROMPT | llm | StrOutputParser()
 
-    # Limit history to the last 6 messages (3 turns) to save tokens and avoid rate limits
-    history = messages[-7:-1] if len(messages) > 1 else []
+    # Limit history to the last 4 messages and truncate each to keep token budget under limits
+    from langchain_core.messages import HumanMessage
+    history = []
+    for m in (messages[-5:-1] if len(messages) > 1 else []):
+        text = (m.content or "")[:350].strip()
+        if isinstance(m, HumanMessage):
+            history.append(HumanMessage(content=text))
+        else:
+            history.append(AIMessage(content=text))
 
 
     try:

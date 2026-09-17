@@ -73,8 +73,8 @@ def grade_hallucinations(state: GraphState) -> GraphState:
         return state
 
     context = "\n\n".join(
-        f"[Doc {i+1}]: {doc.page_content[:800]}"
-        for i, doc in enumerate(documents)
+        f"[Doc {i+1}]: {doc.page_content[:600].strip()}"
+        for i, doc in enumerate(documents[:3])
     )
 
     grader_llm = get_grader_llm()

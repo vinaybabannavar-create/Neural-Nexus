@@ -46,8 +46,15 @@ def transform_query(state: GraphState) -> GraphState:
     
     chain = prompt | llm
     
-    # Exclude the current human message from the history passed to the transformer
-    history = messages[:-1]
+    # Exclude the current human message and truncate past turns to avoid token limit overflow
+    from langchain_core.messages import HumanMessage, AIMessage
+    history = []
+    for m in (messages[-5:-1] if len(messages) > 1 else []):
+        text = (m.content or "")[:300].strip()
+        if isinstance(m, HumanMessage):
+            history.append(HumanMessage(content=text))
+        else:
+            history.append(AIMessage(content=text))
     
     try:
         response = chain.invoke({"chat_history": history, "input": question})
