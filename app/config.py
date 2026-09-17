@@ -33,6 +33,11 @@ class Settings:
     RELEVANCE_THRESHOLD: float = float(os.getenv("RELEVANCE_THRESHOLD", "0.5"))
     MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "2"))
 
+    # LiveKit Voice Agent
+    LIVEKIT_URL: str = os.getenv("LIVEKIT_URL", "wss://neural-nexus.livekit.cloud")
+    LIVEKIT_API_KEY: str = os.getenv("LIVEKIT_API_KEY", "")
+    LIVEKIT_API_SECRET: str = os.getenv("LIVEKIT_API_SECRET", "")
+
     # Collection name for ChromaDB
     CHROMA_COLLECTION: str = "corrective_rag_docs"
 

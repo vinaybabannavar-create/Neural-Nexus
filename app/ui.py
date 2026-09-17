@@ -191,10 +191,11 @@ with st.sidebar:
                 try:
                     ingest(url)
                     st.session_state.last_ingested = url
+                    domain_or_name = url.split("://")[-1].strip("/")
                     st.session_state.suggested_questions = [
-                        "What is this website about?",
-                        "Summarize the key takeaways from the page.",
-                        "Who is the author or organization behind this?"
+                        f"What is {domain_or_name} about and what are its key features?",
+                        f"Summarize the main content and architecture from {domain_or_name}",
+                        f"What technologies or tools are mentioned in {domain_or_name}?"
                     ]
                     st.success("Verified Source")
                 except Exception as e:
