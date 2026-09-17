@@ -15,17 +15,25 @@ import {
   AlertTriangle,
   FileText,
   UploadCloud,
-  File,
+  File as FileIcon,
   X,
   RefreshCw,
   Sparkles,
-  Volume2
+  Volume2,
+  Trash2,
+  CheckCircle2,
+  ExternalLink,
+  ChevronRight,
+  Info,
+  Search,
+  Sliders
 } from "lucide-react";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  timestamp?: string;
   meta?: {
     trust_score?: number;
     trust_rating?: string;
@@ -52,12 +60,13 @@ export default function Home() {
     {
       id: "welcome",
       role: "assistant",
-      content: "Hello! I am **Neural Nexus C-RAG v2**.\n\nUpload a document (PDF, TXT, MD) or enter a web URL on the left, then ask me anything. I verify factual grounding with zero hallucinations, track real-time Trust Scores, and display per-node execution telemetry.",
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      content: "Hello! I am **Neural Nexus C-RAG v2** — an enterprise self-reflective Retrieval-Augmented Generation system.\n\nUpload a document (PDF, TXT, MD) or enter a web URL on the left, then ask me anything. Every response is verified for factual grounding with zero hallucinations, complete with real-time Trust Scores and latency telemetry.",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"chat" | "quarantine" | "metrics">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "metrics" | "quarantine">("chat");
   const [voiceMode, setVoiceMode] = useState(false);
   
   // Knowledge Ingestion State
@@ -66,9 +75,15 @@ export default function Home() {
   const [ingestUrl, setIngestUrl] = useState("");
   const [ingesting, setIngesting] = useState(false);
   const [ingestMessage, setIngestMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
+  const [indexedSources, setIndexedSources] = useState<string[]>([]);
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([
+    "What is the core architecture of Neural Nexus?",
+    "How does the 8-node LangGraph pipeline prevent hallucinations?",
+    "Explain the composite Trust Score formula."
+  ]);
 
   const [quarantineLogs, setQuarantineLogs] = useState<QuarantineItem[]>([]);
+  const [quarantineSearch, setQuarantineSearch] = useState("");
   const [selectedMeta, setSelectedMeta] = useState<any>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -99,7 +114,12 @@ export default function Home() {
     if (!textToSend || loading) return;
 
     const userMsgId = `user_${Date.now()}`;
-    const newMsg: Message = { id: userMsgId, role: "user", content: textToSend };
+    const newMsg: Message = { 
+      id: userMsgId, 
+      role: "user", 
+      content: textToSend,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
 
     setMessages((prev) => [...prev, newMsg]);
     if (!queryText) setInput("");
@@ -120,7 +140,7 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        throw new Error(`Server returned ${res.status}`);
+        throw new Error(`Server returned status ${res.status}`);
       }
 
       const data = await res.json();
@@ -128,6 +148,7 @@ export default function Home() {
         id: data.request_id || `asst_${Date.now()}`,
         role: "assistant",
         content: data.answer,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         meta: {
           trust_score: data.trust_score,
           trust_rating: data.trust_rating,
@@ -145,7 +166,8 @@ export default function Home() {
       const errorMsg: Message = {
         id: `err_${Date.now()}`,
         role: "assistant",
-        content: `⚠️ **Connection/Pipeline Error:** ${err.message}. Ensure FastAPI server is running on \`http://localhost:8000\`.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        content: `⚠️ **Connection/Pipeline Error:** ${err.message}. Please verify the FastAPI backend is running on \`http://localhost:8000\`.`,
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
@@ -167,6 +189,7 @@ export default function Home() {
 
     const formData = new FormData();
     formData.append("file", selectedFile);
+    const fileName = selectedFile.name;
 
     try {
       const res = await fetch("http://localhost:8000/ingest/file", {
@@ -177,12 +200,13 @@ export default function Home() {
       if (res.ok) {
         setIngestMessage({
           type: "success",
-          text: `✓ Verified & Indexed: ${selectedFile.name}`,
+          text: `Verified & Indexed: ${fileName}`,
         });
+        setIndexedSources((prev) => Array.from(new Set([fileName, ...prev])));
         setSuggestedQuestions([
-          `What are the main points in ${selectedFile.name}?`,
-          `Can you summarize the key findings of ${selectedFile.name}?`,
-          `What is the context and architecture in ${selectedFile.name}?`,
+          `What are the main points in ${fileName}?`,
+          `Can you summarize the key findings of ${fileName}?`,
+          `What methodology or architecture is presented in ${fileName}?`,
         ]);
         setSelectedFile(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
@@ -191,13 +215,13 @@ export default function Home() {
         const err = await res.json();
         setIngestMessage({
           type: "error",
-          text: `✗ Ingestion rejected: ${err.detail || "Security check failed"}`,
+          text: `Ingestion rejected: ${err.detail || "Security check failed"}`,
         });
       }
     } catch (e: any) {
       setIngestMessage({
         type: "error",
-        text: `✗ Upload failed: ${e.message}`,
+        text: `Upload failed: ${e.message}`,
       });
     } finally {
       setIngesting(false);
@@ -208,18 +232,21 @@ export default function Home() {
     if (!ingestUrl.trim()) return;
     setIngesting(true);
     setIngestMessage(null);
+    const targetUrl = ingestUrl.trim();
+
     try {
       const res = await fetch("http://localhost:8000/ingest/url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: ingestUrl.trim() }),
+        body: JSON.stringify({ url: targetUrl }),
       });
       if (res.ok) {
-        const domainOrName = ingestUrl.split("://").pop()?.replace(/\/$/, "") || ingestUrl;
+        const domainOrName = targetUrl.split("://").pop()?.replace(/\/$/, "") || targetUrl;
         setIngestMessage({
           type: "success",
-          text: `✓ Verified Source: ${domainOrName}`,
+          text: `Verified Source: ${domainOrName}`,
         });
+        setIndexedSources((prev) => Array.from(new Set([domainOrName, ...prev])));
         setSuggestedQuestions([
           `What is ${domainOrName} about and what are its key features?`,
           `Summarize the main content from ${domainOrName}`,
@@ -231,13 +258,13 @@ export default function Home() {
         const err = await res.json();
         setIngestMessage({
           type: "error",
-          text: `✗ Ingestion failed: ${err.detail || "Security perimeter violation"}`,
+          text: `Ingestion failed: ${err.detail || "Security perimeter violation"}`,
         });
       }
     } catch (e: any) {
       setIngestMessage({
         type: "error",
-        text: `✗ Connection error: ${e.message}`,
+        text: `Connection error: ${e.message}`,
       });
     } finally {
       setIngesting(false);
@@ -258,10 +285,8 @@ export default function Home() {
         if (res.ok) {
           const tokenData = await res.json();
           console.log("[LiveKit] Acquired room token:", tokenData);
-          setVoiceMode(true);
-        } else {
-          setVoiceMode(true);
         }
+        setVoiceMode(true);
       } catch (e) {
         setVoiceMode(true);
       }
@@ -270,444 +295,653 @@ export default function Home() {
     }
   };
 
+  const clearChat = () => {
+    setMessages([
+      {
+        id: "welcome",
+        role: "assistant",
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        content: "Conversation history cleared. Ready for your next inquiry.",
+      },
+    ]);
+    setSelectedMeta(null);
+  };
+
+  const filteredQuarantine = quarantineLogs.filter(q => 
+    q.source.toLowerCase().includes(quarantineSearch.toLowerCase()) ||
+    q.reason.toLowerCase().includes(quarantineSearch.toLowerCase()) ||
+    q.snippet.toLowerCase().includes(quarantineSearch.toLowerCase())
+  );
+
   return (
-    <main className="flex h-screen w-screen overflow-hidden">
-      {/* ── LEFT SIDEBAR ──────────────────────────────────────── */}
-      <aside className="w-84 glass-panel flex flex-col justify-between p-5 border-r border-glassBorder z-10">
-        <div className="flex flex-col gap-5 overflow-y-auto">
-          {/* Brand */}
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-accent to-accentPurple flex items-center justify-center text-xl shadow-lg shadow-accent/20">
-              🧠
-            </div>
-            <div>
-              <h1 className="font-bold text-lg leading-tight bg-gradient-to-r from-accent to-accentPurple bg-clip-text text-transparent">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#08090e] text-slate-200 font-sans">
+      
+      {/* ════════════════════════ TOP HEADER BAR ════════════════════════ */}
+      <header className="h-16 px-6 glass-panel border-b border-white/[0.08] flex items-center justify-between z-20 flex-shrink-0">
+        
+        {/* Brand */}
+        <div className="flex items-center gap-3.5">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-500 to-purple-600 flex items-center justify-center text-xl shadow-lg shadow-cyan-500/25 border border-white/20">
+            🧠
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-base tracking-wider bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent uppercase">
                 Neural Nexus
-              </h1>
-              <span className="text-xs text-slate-400">Next.js & LiveKit C-RAG</span>
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 uppercase tracking-widest">
+                C-RAG v2.0
+              </span>
             </div>
+            <span className="text-[11px] text-slate-400 font-medium">
+              Self-Reflective RAG • Next.js & LiveKit Engine
+            </span>
+          </div>
+        </div>
+
+        {/* Center View Switcher */}
+        <nav className="flex items-center bg-black/40 p-1 rounded-xl border border-white/[0.08] shadow-inner">
+          <button
+            onClick={() => setActiveTab("chat")}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === "chat"
+                ? "bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Sparkles size={14} className={activeTab === "chat" ? "text-cyan-400" : "text-slate-400"} />
+            Reasoning Chat
+          </button>
+
+          <button
+            onClick={() => setActiveTab("metrics")}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === "metrics"
+                ? "bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Activity size={14} className={activeTab === "metrics" ? "text-cyan-400" : "text-slate-400"} />
+            Telemetry
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab("quarantine");
+              fetchQuarantineLogs();
+            }}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === "quarantine"
+                ? "bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <ShieldAlert size={14} className={activeTab === "quarantine" ? "text-red-400" : "text-slate-400"} />
+            Quarantine
+            {quarantineLogs.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                {quarantineLogs.length}
+              </span>
+            )}
+          </button>
+        </nav>
+
+        {/* Right Status Indicators */}
+        <div className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-medium">
+            <ShieldCheck size={14} />
+            <span>Perimeter Active</span>
           </div>
 
-          {/* Navigation Tabs */}
-          <div className="flex bg-surface p-1 rounded-xl border border-glassBorder text-xs">
-            <button
-              onClick={() => setActiveTab("chat")}
-              className={`flex-1 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "chat" ? "bg-accent/20 text-accent" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Chat
-            </button>
-            <button
-              onClick={() => setActiveTab("metrics")}
-              className={`flex-1 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "metrics" ? "bg-accent/20 text-accent" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Telemetry
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab("quarantine");
-                fetchQuarantineLogs();
-              }}
-              className={`flex-1 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "quarantine" ? "bg-accent/20 text-accent" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Quarantine
-            </button>
+          <div className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/25 text-purple-300 font-medium">
+            <Layers size={14} />
+            <span>8-Node LangGraph</span>
           </div>
 
-          {/* Knowledge Ingestion */}
-          <div className="glass-card p-4 rounded-xl border border-glassBorder flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs uppercase tracking-wider text-slate-300 font-semibold flex items-center gap-1.5">
-                <Database size={13} className="text-accent" /> Knowledge Base
-              </label>
-              <div className="flex bg-surface rounded-lg p-0.5 border border-glassBorder text-[11px]">
-                <button
-                  onClick={() => setIngestType("file")}
-                  className={`px-2 py-0.5 rounded font-medium transition-all ${
-                    ingestType === "file" ? "bg-accent/20 text-accent" : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  File
-                </button>
-                <button
-                  onClick={() => setIngestType("url")}
-                  className={`px-2 py-0.5 rounded font-medium transition-all ${
-                    ingestType === "url" ? "bg-accent/20 text-accent" : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  URL
-                </button>
-              </div>
-            </div>
+          <button
+            onClick={clearChat}
+            title="Clear conversation"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/[0.05] border border-transparent hover:border-white/[0.08] transition-all"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+      </header>
 
-            {/* Ingest Mode: File Upload */}
-            {ingestType === "file" && (
-              <div className="flex flex-col gap-2.5">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileSelect}
-                  accept=".pdf,.txt,.md"
-                  className="hidden"
-                  id="doc-upload"
-                />
+      {/* ════════════════════════ MAIN BODY WORKSPACE ════════════════════════ */}
+      <div className="flex flex-1 overflow-hidden">
 
-                {!selectedFile ? (
-                  <label
-                    htmlFor="doc-upload"
-                    className="border-2 border-dashed border-glassBorder hover:border-accent/50 rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 cursor-pointer bg-surface/50 hover:bg-surface transition-all group"
+        {/* ── LEFT SIDEBAR: KNOWLEDGE BASE & VOICE ── */}
+        <aside className="w-80 glass-panel border-r border-white/[0.08] flex flex-col justify-between p-4 flex-shrink-0 overflow-y-auto">
+          
+          <div className="flex flex-col gap-4">
+            
+            {/* Knowledge Ingestion Card */}
+            <div className="glass-card p-4 rounded-2xl border border-white/[0.08] shadow-lg flex flex-col gap-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Database size={15} className="text-cyan-400" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                    Knowledge Base
+                  </span>
+                </div>
+
+                {/* Segmented Control */}
+                <div className="flex bg-black/50 p-0.5 rounded-lg border border-white/[0.08] text-[11px]">
+                  <button
+                    onClick={() => setIngestType("file")}
+                    className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                      ingestType === "file"
+                        ? "bg-cyan-500/20 text-cyan-300 shadow-sm border border-cyan-500/30"
+                        : "text-slate-400 hover:text-white"
+                    }`}
                   >
-                    <UploadCloud size={22} className="text-slate-400 group-hover:text-accent transition-colors" />
-                    <span className="text-xs font-medium text-slate-300">Select Document</span>
-                    <span className="text-[10px] text-slate-500">PDF, TXT, Markdown (up to 20MB)</span>
-                  </label>
-                ) : (
-                  <div className="bg-surface border border-glassBorder rounded-lg p-2.5 flex items-center justify-between">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <File size={16} className="text-accent flex-shrink-0" />
-                      <div className="flex flex-col overflow-hidden">
-                        <span className="text-xs font-medium text-slate-200 truncate">{selectedFile.name}</span>
-                        <span className="text-[10px] text-slate-500">{(selectedFile.size / 1024).toFixed(0)} KB</span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setSelectedFile(null);
-                        if (fileInputRef.current) fileInputRef.current.value = "";
-                      }}
-                      className="text-slate-400 hover:text-white p-1"
+                    Document
+                  </button>
+                  <button
+                    onClick={() => setIngestType("url")}
+                    className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                      ingestType === "url"
+                        ? "bg-cyan-500/20 text-cyan-300 shadow-sm border border-cyan-500/30"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Web URL
+                  </button>
+                </div>
+              </div>
+
+              {/* Mode 1: Document Upload */}
+              {ingestType === "file" && (
+                <div className="flex flex-col gap-3">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileSelect}
+                    accept=".pdf,.txt,.md"
+                    className="hidden"
+                    id="doc-upload-input"
+                  />
+
+                  {!selectedFile ? (
+                    <label
+                      htmlFor="doc-upload-input"
+                      className="group border-2 border-dashed border-white/[0.12] hover:border-cyan-500/50 rounded-xl p-4 flex flex-col items-center justify-center gap-2 cursor-pointer bg-white/[0.015] hover:bg-cyan-500/[0.04] transition-all"
                     >
-                      <X size={14} />
+                      <div className="p-2.5 rounded-xl bg-white/[0.03] group-hover:bg-cyan-500/10 transition-colors">
+                        <UploadCloud size={20} className="text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                      </div>
+                      <div className="text-center">
+                        <span className="text-xs font-semibold text-slate-200 block">
+                          Select or Drop File
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          PDF, TXT, MD (Max 20MB)
+                        </span>
+                      </div>
+                    </label>
+                  ) : (
+                    <div className="bg-black/40 border border-cyan-500/30 rounded-xl p-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 overflow-hidden">
+                        <FileIcon size={16} className="text-cyan-400 flex-shrink-0" />
+                        <div className="flex flex-col overflow-hidden">
+                          <span className="text-xs font-medium text-slate-200 truncate">{selectedFile.name}</span>
+                          <span className="text-[10px] text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedFile(null);
+                          if (fileInputRef.current) fileInputRef.current.value = "";
+                        }}
+                        className="text-slate-400 hover:text-white p-1 hover:bg-white/[0.1] rounded-lg transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleIngestFile}
+                    disabled={ingesting || !selectedFile}
+                    className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 transition-all"
+                  >
+                    {ingesting ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
+                    {ingesting ? "Analyzing & Indexing..." : "🚀 Ingest & Screen Document"}
+                  </button>
+                </div>
+              )}
+
+              {/* Mode 2: Web URL */}
+              {ingestType === "url" && (
+                <div className="flex flex-col gap-3">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="https://example.com/docs"
+                      value={ingestUrl}
+                      onChange={(e) => setIngestUrl(e.target.value)}
+                      className="w-full bg-black/40 border border-white/[0.1] focus:border-cyan-500 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+                    />
+                  </div>
+                  <button
+                    onClick={handleIngestUrl}
+                    disabled={ingesting || !ingestUrl.trim()}
+                    className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 disabled:opacity-40 flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20 transition-all"
+                  >
+                    {ingesting ? <RefreshCw size={14} className="animate-spin" /> : <Globe size={14} />}
+                    {ingesting ? "Scraping & Indexing..." : "🌐 Ingest Web URL"}
+                  </button>
+                </div>
+              )}
+
+              {/* Feedback status */}
+              {ingestMessage && (
+                <div className={`p-2.5 rounded-xl border text-[11px] flex items-center gap-2 ${
+                  ingestMessage.type === "success"
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                    : "bg-red-500/10 border-red-500/30 text-red-300"
+                }`}>
+                  {ingestMessage.type === "success" ? <CheckCircle2 size={13} className="flex-shrink-0 text-emerald-400" /> : <AlertTriangle size={13} className="flex-shrink-0 text-red-400" />}
+                  <span className="truncate">{ingestMessage.text}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Quick Suggested Prompts */}
+            {suggestedQuestions.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <Sparkles size={12} className="text-amber-400" />
+                  <span>Suggested Inquiries</span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {suggestedQuestions.map((q, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleSend(q)}
+                      className="text-left text-xs bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.06] hover:border-cyan-500/40 rounded-xl p-2.5 text-slate-300 hover:text-white transition-all flex items-start gap-2 group shadow-sm"
+                    >
+                      <span className="text-cyan-400 group-hover:translate-x-0.5 transition-transform">💡</span>
+                      <span className="leading-relaxed">{q}</span>
                     </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Active Sources List */}
+            {indexedSources.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Indexed Contexts
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {indexedSources.map((src, i) => (
+                    <span key={i} className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-white/[0.04] border border-white/[0.08] text-slate-300 truncate max-w-[260px] flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      {src}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* LiveKit Voice Agent Card */}
+          <div className="glass-card p-3.5 rounded-2xl border border-white/[0.08] flex flex-col gap-2.5 mt-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-xl ${voiceMode ? "bg-emerald-500/20 text-emerald-400 animate-pulse" : "bg-white/[0.05] text-slate-400"}`}>
+                  <Volume2 size={16} />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-slate-200">LiveKit Voice</span>
+                  <span className="text-[10px] text-slate-400">WebRTC Sub-Second Mode</span>
+                </div>
+              </div>
+
+              <button
+                onClick={toggleVoiceMode}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                  voiceMode
+                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-500/20"
+                    : "bg-white/[0.05] text-slate-400 hover:text-white border border-white/[0.08]"
+                }`}
+              >
+                {voiceMode ? <Mic size={13} /> : <MicOff size={13} />}
+                {voiceMode ? "Live" : "Off"}
+              </button>
+            </div>
+            
+            {voiceMode && (
+              <div className="flex items-center justify-between px-2 py-1 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-[10px] text-emerald-400 font-mono">
+                <span>STT 150ms → RAG 600ms → TTS 150ms</span>
+                <span className="animate-ping h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              </div>
+            )}
+          </div>
+        </aside>
+
+        {/* ── CENTER WORKSPACE ── */}
+        <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#08090e]">
+          
+          {/* ════════ VIEW 1: REASONING CHAT ════════ */}
+          {activeTab === "chat" && (
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              
+              {/* Message Stream */}
+              <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 max-w-4xl mx-auto w-full">
+                {messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5 px-1">
+                      <span className="text-[11px] font-semibold text-slate-400">
+                        {m.role === "user" ? "You" : "Neural Nexus C-RAG"}
+                      </span>
+                      {m.timestamp && (
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {m.timestamp}
+                        </span>
+                      )}
+                    </div>
+
+                    <div
+                      className={`rounded-2xl p-5 text-sm leading-relaxed ${
+                        m.role === "user"
+                          ? "max-w-2xl bg-gradient-to-r from-blue-600/30 to-purple-600/30 border border-blue-500/40 text-slate-100 rounded-tr-sm shadow-md"
+                          : "max-w-3xl w-full glass-card border border-white/[0.08] text-slate-200 rounded-tl-sm shadow-xl backdrop-blur-md"
+                      }`}
+                    >
+                      {/* Check if message has human verification notice */}
+                      {m.content.includes("[STATUS: PENDING_HUMAN_VERIFICATION]") ? (
+                        <div className="flex flex-col gap-3">
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+                            <AlertTriangle size={16} className="text-amber-400 flex-shrink-0" />
+                            <span className="font-bold">Pending Human Verification</span>
+                            <span className="text-amber-400/80 font-normal">— Confidence circuit-breaker triggered</span>
+                          </div>
+                          <div className="whitespace-pre-wrap text-slate-300 font-sans">
+                            {m.content.replace("⚠️ [STATUS: PENDING_HUMAN_VERIFICATION]", "").trim()}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="whitespace-pre-wrap font-sans text-slate-200">
+                          {m.content}
+                        </div>
+                      )}
+
+                      {/* Meta / Trust Score Badge on Assistant Messages */}
+                      {m.meta && (
+                        <div className="mt-4 pt-3.5 border-t border-white/[0.08] flex flex-wrap items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center gap-2">
+                            {m.meta.trust_score !== undefined && (
+                              <div
+                                onClick={() => setSelectedMeta(m.meta)}
+                                className={`cursor-pointer px-3 py-1 rounded-lg border font-bold flex items-center gap-1.5 transition-all shadow-sm ${
+                                  m.meta.trust_score >= 80
+                                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:border-emerald-500/60"
+                                    : m.meta.trust_score >= 50
+                                    ? "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:border-amber-500/60"
+                                    : "bg-red-500/10 border-red-500/30 text-red-400 hover:border-red-500/60"
+                                }`}
+                              >
+                                <Activity size={13} />
+                                <span>Trust Score: {m.meta.trust_score.toFixed(0)}/100</span>
+                                <span className="text-[10px] font-normal opacity-80 font-mono">({m.meta.trust_rating || "Grounded"})</span>
+                              </div>
+                            )}
+
+                            {m.meta.web_search_used && (
+                              <span className="px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-300 border border-purple-500/20 text-[11px] font-medium flex items-center gap-1">
+                                <Globe size={11} /> Web Fallback
+                              </span>
+                            )}
+                          </div>
+
+                          {m.meta.sources && m.meta.sources.length > 0 && (
+                            <div className="flex items-center gap-1.5 text-slate-400 text-[11px]">
+                              <span className="text-slate-500">Sources:</span>
+                              <span className="text-cyan-400/90 font-mono truncate max-w-xs">
+                                {m.meta.sources.join(", ")}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {loading && (
+                  <div className="flex items-center gap-3 text-cyan-400 text-xs font-semibold p-4 glass-card rounded-2xl border border-cyan-500/30 w-fit animate-pulse shadow-lg shadow-cyan-500/10">
+                    <RefreshCw size={15} className="animate-spin text-cyan-400" />
+                    <span>8-Node LangGraph reasoning & verifying citations...</span>
                   </div>
                 )}
-
-                <button
-                  onClick={handleIngestFile}
-                  disabled={ingesting || !selectedFile}
-                  className="w-full bg-gradient-to-r from-accent to-accentPurple hover:opacity-90 text-white py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-accent/10"
-                >
-                  {ingesting ? <RefreshCw size={13} className="animate-spin" /> : <FileText size={13} />}
-                  {ingesting ? "Indexing Document..." : "🚀 Ingest Document"}
-                </button>
+                <div ref={chatEndRef} />
               </div>
-            )}
 
-            {/* Ingest Mode: URL */}
-            {ingestType === "url" && (
-              <div className="flex flex-col gap-2">
-                <div className="relative">
+              {/* Floating Bottom Input Bar */}
+              <div className="p-4 glass-panel border-t border-white/[0.08]">
+                <form 
+                  onSubmit={(e) => { e.preventDefault(); handleSend(); }} 
+                  className="max-w-4xl mx-auto flex items-center gap-2.5 bg-black/60 border border-white/[0.12] focus-within:border-cyan-500/70 rounded-2xl p-1.5 shadow-2xl transition-all"
+                >
                   <input
                     type="text"
-                    placeholder="https://example.com/doc"
-                    value={ingestUrl}
-                    onChange={(e) => setIngestUrl(e.target.value)}
-                    className="w-full bg-surface border border-glassBorder rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent"
+                    placeholder="Ask Neural Nexus anything about your documents or knowledge base..."
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    disabled={loading}
+                    className="flex-1 bg-transparent px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
                   />
-                </div>
-                <button
-                  onClick={handleIngestUrl}
-                  disabled={ingesting || !ingestUrl.trim()}
-                  className="w-full bg-surfaceHover hover:bg-accent/20 border border-glassBorder text-accent hover:border-accent/40 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-40 shadow-sm"
-                >
-                  {ingesting ? <RefreshCw size={13} className="animate-spin" /> : <Globe size={13} />}
-                  {ingesting ? "Analyzing URL..." : "🌐 Ingest URL"}
-                </button>
-              </div>
-            )}
-
-            {/* Ingest Status Feedback */}
-            {ingestMessage && (
-              <div className={`text-[11px] p-2 rounded-lg border ${
-                ingestMessage.type === "success"
-                  ? "bg-trustGreen/10 border-trustGreen/30 text-trustGreen"
-                  : "bg-trustRed/10 border-trustRed/30 text-trustRed"
-              }`}>
-                {ingestMessage.text}
-              </div>
-            )}
-          </div>
-
-          {/* Suggested Questions (Generated after ingest) */}
-          {suggestedQuestions.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                <Sparkles size={12} className="text-trustYellow" /> Suggested Queries
-              </span>
-              <div className="flex flex-col gap-1.5">
-                {suggestedQuestions.map((q, idx) => (
                   <button
-                    key={idx}
-                    onClick={() => handleSend(q)}
-                    className="text-left text-xs bg-surface/70 hover:bg-surface border border-glassBorder hover:border-accent/40 rounded-lg p-2 text-slate-300 hover:text-white transition-all leading-snug"
+                    type="submit"
+                    disabled={loading || !input.trim()}
+                    className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white p-3 rounded-xl font-semibold flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/25 transition-all"
                   >
-                    💡 {q}
+                    <Send size={15} />
                   </button>
-                ))}
+                </form>
               </div>
             </div>
           )}
-        </div>
 
-        {/* LiveKit Voice Mode Card */}
-        <div className="glass-card p-4 rounded-xl flex flex-col gap-3 mt-4 border border-glassBorder">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Volume2 size={16} className={voiceMode ? "text-trustGreen animate-pulse" : "text-slate-400"} />
-              <span className="text-xs font-semibold text-slate-200">LiveKit Voice</span>
-            </div>
-            <button
-              onClick={toggleVoiceMode}
-              className={`p-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-                voiceMode
-                  ? "bg-trustGreen/20 text-trustGreen border border-trustGreen/40"
-                  : "bg-surfaceHover text-slate-400 border border-glassBorder hover:text-white"
-              }`}
-            >
-              {voiceMode ? <Mic size={14} /> : <MicOff size={14} />}
-              {voiceMode ? "Active" : "Off"}
-            </button>
-          </div>
-          <p className="text-[11px] text-slate-400">
-            {voiceMode
-              ? "LiveKit WebRTC active: Sub-second voice round-trip (STT 150ms → RAG 600ms → TTS 150ms)."
-              : "Enable real-time voice mode to speak directly with Neural Nexus."}
-          </p>
-        </div>
-      </aside>
+          {/* ════════ VIEW 2: TELEMETRY ════════ */}
+          {activeTab === "metrics" && (
+            <div className="flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full flex flex-col gap-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <Activity size={20} className="text-cyan-400" />
+                    Pipeline Telemetry & Execution Analytics
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Real-time performance metrics computed across all 8 LangGraph stages.
+                  </p>
+                </div>
+              </div>
 
-      {/* ── MAIN CONTENT AREA ─────────────────────────────────── */}
-      <section className="flex-1 flex flex-col h-full overflow-hidden bg-background">
-        {/* Header */}
-        <header className="h-16 glass-panel border-b border-glassBorder flex items-center justify-between px-6 z-10">
-          <div className="flex items-center gap-3">
-            <h2 className="font-semibold text-sm text-slate-200">
-              {activeTab === "chat" && "Conversation & Real-time Reasoning"}
-              {activeTab === "metrics" && "Pipeline Latency & Trust Telemetry"}
-              {activeTab === "quarantine" && "Security Perimeter & Quarantine Store Audit"}
-            </h2>
-          </div>
-          <div className="flex items-center gap-4 text-xs">
-            <span className="flex items-center gap-1.5 text-trustGreen font-medium">
-              <ShieldCheck size={14} /> Perimeter Active
-            </span>
-            <span className="text-slate-600">|</span>
-            <span className="text-slate-400 flex items-center gap-1">
-              <Layers size={13} className="text-accent" /> 8-Node LangGraph
-            </span>
-          </div>
-        </header>
-
-        {/* Tab 1: Chat View */}
-        {activeTab === "chat" && (
-          <div className="flex-1 flex flex-col h-[calc(100vh-4rem)] overflow-hidden">
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5">
-              {messages.map((m) => (
-                <div
-                  key={m.id}
-                  className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
-                >
-                  <div
-                    className={`max-w-2xl rounded-2xl p-4 text-sm leading-relaxed ${
-                      m.role === "user"
-                        ? "bg-gradient-to-r from-accent/20 to-accentPurple/20 border border-accent/40 text-white rounded-br-none"
-                        : "glass-card text-slate-200 rounded-bl-none border-glassBorder"
-                    }`}
-                  >
-                    <div className="whitespace-pre-wrap">{m.content}</div>
-
-                    {/* Metadata & Trust Badge for Assistant */}
-                    {m.meta && (
-                      <div className="mt-4 pt-3 border-t border-glassBorder flex flex-wrap items-center gap-2 text-xs">
-                        {m.meta.trust_score !== undefined && (
-                          <span
-                            onClick={() => setSelectedMeta(m.meta)}
-                            className="cursor-pointer bg-surface px-2.5 py-1 rounded-md border border-glassBorder text-trustGreen font-bold flex items-center gap-1 hover:border-trustGreen/50 transition-all"
-                          >
-                            <Activity size={12} />
-                            Trust: {m.meta.trust_score.toFixed(0)}/100
-                          </span>
-                        )}
-                        {m.meta.escalation_status && (
-                          <span className="bg-trustRed/20 text-trustRed border border-trustRed/30 px-2 py-0.5 rounded font-medium flex items-center gap-1">
-                            <AlertTriangle size={11} /> {m.meta.escalation_status}
-                          </span>
-                        )}
-                        {m.meta.web_search_used && (
-                          <span className="bg-accentPurple/20 text-accentPurple px-2 py-0.5 rounded flex items-center gap-1">
-                            <Globe size={11} /> Web Fallback
-                          </span>
-                        )}
-                        {m.meta.sources && m.meta.sources.length > 0 && (
-                          <span className="text-slate-400 text-[11px]">
-                            Sources: {m.meta.sources.join(", ")}
-                          </span>
-                        )}
-                      </div>
-                    )}
+              {/* Top 3 KPI Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="glass-card p-5 rounded-2xl border border-white/[0.08] flex flex-col gap-1.5 shadow-lg">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Composite Trust Index</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold text-emerald-400 font-mono">
+                      {selectedMeta?.trust_score ? `${selectedMeta.trust_score.toFixed(0)}` : "100"}
+                    </span>
+                    <span className="text-sm text-slate-500 font-medium">/ 100</span>
                   </div>
+                  <span className="text-[11px] text-slate-500 font-medium">Relevance (40) + Grounding (40) + Speed (20)</span>
                 </div>
-              ))}
 
-              {loading && (
-                <div className="flex items-center gap-3 text-accent text-xs font-medium animate-pulse p-4">
-                  <RefreshCw size={14} className="animate-spin" />
-                  Self-reflective grading & synthesizing answer...
+                <div className="glass-card p-5 rounded-2xl border border-white/[0.08] flex flex-col gap-1.5 shadow-lg">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Document Relevance</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold text-cyan-400 font-mono">
+                      {selectedMeta?.relevance_score ? `${(selectedMeta.relevance_score * 100).toFixed(0)}%` : "100%"}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 font-medium">Threshold: 50% for direct generation</span>
                 </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
 
-            {/* Input Bar */}
-            <div className="p-4 glass-panel border-t border-glassBorder">
-              <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex gap-2 max-w-4xl mx-auto">
-                <input
-                  type="text"
-                  placeholder="Ask Neural Nexus anything (e.g. 'What is contextual chunking?')..."
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  disabled={loading}
-                  className="flex-1 bg-surface border border-glassBorder rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent"
-                />
-                <button
-                  type="submit"
-                  disabled={loading || !input.trim()}
-                  className="bg-gradient-to-r from-accent to-accentPurple text-white px-5 rounded-xl font-semibold flex items-center gap-2 hover:opacity-90 disabled:opacity-50 transition-all shadow-lg shadow-accent/20"
-                >
-                  <Send size={15} />
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
+                <div className="glass-card p-5 rounded-2xl border border-white/[0.08] flex flex-col gap-1.5 shadow-lg">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Escalation Circuit</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xl font-bold text-slate-200">
+                      {selectedMeta?.escalation_status || "Normal (Grounded)"}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 font-medium">Auto-fallback to human oversight on ungrounded claims</span>
+                </div>
+              </div>
 
-        {/* Tab 2: Metrics & Telemetry View */}
-        {activeTab === "metrics" && (
-          <div className="p-6 flex-1 overflow-y-auto flex flex-col gap-6 max-w-4xl mx-auto w-full">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="glass-card p-4 rounded-xl border border-glassBorder flex flex-col gap-1">
-                <span className="text-xs text-slate-400 font-medium">Composite Trust Index</span>
-                <span className="text-2xl font-bold text-trustGreen">
-                  {selectedMeta?.trust_score ? `${selectedMeta.trust_score.toFixed(0)}/100` : "100/100"}
-                </span>
-                <span className="text-[11px] text-slate-500">Relevance (40) + Grounding (40) + Speed (20)</span>
-              </div>
-              <div className="glass-card p-4 rounded-xl border border-glassBorder flex flex-col gap-1">
-                <span className="text-xs text-slate-400 font-medium">Relevance Score</span>
-                <span className="text-2xl font-bold text-accent">
-                  {selectedMeta?.relevance_score ? `${(selectedMeta.relevance_score * 100).toFixed(0)}%` : "100%"}
-                </span>
-                <span className="text-[11px] text-slate-500">Threshold: 50% for direct generation</span>
-              </div>
-              <div className="glass-card p-4 rounded-xl border border-glassBorder flex flex-col gap-1">
-                <span className="text-xs text-slate-400 font-medium">Escalation Status</span>
-                <span className="text-2xl font-bold text-slate-200">
-                  {selectedMeta?.escalation_status || "Normal"}
-                </span>
-                <span className="text-[11px] text-slate-500">Confidence circuit-breaker</span>
-              </div>
-            </div>
+              {/* Per-Node Latency Waterfall Table */}
+              <div className="glass-card p-6 rounded-2xl border border-white/[0.08] flex flex-col gap-4 shadow-xl">
+                <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                  <Clock size={16} className="text-cyan-400" />
+                  Per-Node Latency Breakdown (LangGraph Execution)
+                </h4>
 
-            {/* Per-Node Latency Table */}
-            <div className="glass-card p-5 rounded-xl border border-glassBorder flex flex-col gap-4">
-              <h3 className="font-semibold text-sm text-slate-200 flex items-center gap-2">
-                <Clock size={15} className="text-accent" /> Per-Node Execution Latency Breakdown
-              </h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-glassBorder text-slate-400">
-                      <th className="py-2">Pipeline Node</th>
-                      <th className="py-2">Latency (Seconds)</th>
-                      <th className="py-2">Latency (ms)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-glassBorder text-slate-300">
-                    {selectedMeta?.latency_metrics ? (
-                      Object.entries(selectedMeta.latency_metrics).map(([node, sec]: any) => (
-                        <tr key={node}>
-                          <td className="py-2 font-mono text-accent">{node}</td>
-                          <td className="py-2">{sec.toFixed(3)}s</td>
-                          <td className="py-2">{(sec * 1000).toFixed(1)}ms</td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-white/[0.08] text-slate-400 font-semibold">
+                        <th className="py-3 px-4">Pipeline Node</th>
+                        <th className="py-3 px-4">Execution Duration</th>
+                        <th className="py-3 px-4">Latency Waterfall</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04] text-slate-300">
+                      {selectedMeta?.latency_metrics ? (
+                        Object.entries(selectedMeta.latency_metrics).map(([node, sec]: any) => {
+                          const ms = (sec * 1000).toFixed(1);
+                          const widthPct = Math.min(100, Math.max(10, (sec / 2) * 100));
+                          return (
+                            <tr key={node} className="hover:bg-white/[0.02] transition-colors">
+                              <td className="py-3 px-4 font-mono font-bold text-cyan-400">{node}</td>
+                              <td className="py-3 px-4 font-mono text-slate-200">{ms} ms</td>
+                              <td className="py-3 px-4 w-1/2">
+                                <div className="w-full bg-white/[0.05] h-2 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-gradient-to-r from-cyan-400 to-blue-500 rounded-full" 
+                                    style={{ width: `${widthPct}%` }}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={3} className="py-8 text-center text-slate-500">
+                            Submit a question in the chat to view real-time latency telemetry.
+                          </td>
                         </tr>
-                      ))
-                    ) : (
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ════════ VIEW 3: QUARANTINE AUDIT ════════ */}
+          {activeTab === "quarantine" && (
+            <div className="flex-1 overflow-y-auto p-8 max-w-6xl mx-auto w-full flex flex-col gap-6">
+              
+              {/* Header & Controls */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <ShieldAlert size={20} className="text-red-400" />
+                    Quarantine Store Audit Ledger
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Forensic SQLite repository (<code className="text-cyan-400">quarantine.db</code>) logging screened adversarial injection attempts.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-3 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Filter audit log..."
+                      value={quarantineSearch}
+                      onChange={(e) => setQuarantineSearch(e.target.value)}
+                      className="bg-black/50 border border-white/[0.1] rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500/50 w-52"
+                    />
+                  </div>
+
+                  <button
+                    onClick={fetchQuarantineLogs}
+                    className="bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all"
+                  >
+                    <RefreshCw size={13} /> Refresh
+                  </button>
+                </div>
+              </div>
+
+              {/* Data Table */}
+              <div className="glass-card rounded-2xl border border-white/[0.08] overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-black/40 border-b border-white/[0.08] text-slate-400 font-semibold">
                       <tr>
-                        <td colSpan={3} className="py-4 text-center text-slate-500">
-                          Submit a query to view live per-stage timings.
-                        </td>
+                        <th className="py-3.5 px-4 w-16">#ID</th>
+                        <th className="py-3.5 px-4 w-28">Timestamp</th>
+                        <th className="py-3.5 px-4">Source Document</th>
+                        <th className="py-3.5 px-4">Threat Classification</th>
+                        <th className="py-3.5 px-4 w-24">Risk</th>
+                        <th className="py-3.5 px-4">Forensic Payload Snippet</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04] text-slate-300">
+                      {filteredQuarantine.length > 0 ? (
+                        filteredQuarantine.map((q) => (
+                          <tr key={q.id} className="hover:bg-white/[0.02] transition-colors">
+                            <td className="py-3 px-4 font-mono text-slate-500">#{q.id}</td>
+                            <td className="py-3 px-4 text-slate-400 font-mono text-[11px]">
+                              {q.timestamp.split("T")[0]}
+                            </td>
+                            <td className="py-3 px-4 font-semibold text-slate-200 truncate max-w-[180px]">
+                              {q.source}
+                            </td>
+                            <td className="py-3 px-4 text-red-400 font-medium">
+                              {q.reason}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-red-500/15 border border-red-500/30 text-red-400">
+                                {(q.risk_score * 100).toFixed(0)}%
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 font-mono text-[11px] text-slate-400 truncate max-w-xs">
+                              <code className="bg-black/50 px-2 py-1 rounded text-slate-300 border border-white/[0.06]">
+                                {q.snippet}
+                              </code>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="py-12 text-center text-slate-500">
+                            {quarantineSearch ? "No records matched your search filter." : "No quarantined threats recorded in quarantine.db."}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Tab 3: Quarantine Store Audit */}
-        {activeTab === "quarantine" && (
-          <div className="p-6 flex-1 overflow-y-auto flex flex-col gap-6 max-w-5xl mx-auto w-full">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold text-base text-slate-100 flex items-center gap-2">
-                  <ShieldAlert size={18} className="text-trustRed" /> Quarantine Store Audit Trail
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Forensic log stored in SQLite (`quarantine.db`) tracking rejected prompt injection and jailbreak attempts.
-                </p>
-              </div>
-              <button
-                onClick={fetchQuarantineLogs}
-                className="bg-surface hover:bg-surfaceHover border border-glassBorder px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5"
-              >
-                <RefreshCw size={12} /> Refresh
-              </button>
-            </div>
-
-            <div className="glass-card rounded-xl border border-glassBorder overflow-hidden">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-surface border-b border-glassBorder text-slate-400">
-                  <tr>
-                    <th className="p-3">ID</th>
-                    <th className="p-3">Timestamp (UTC)</th>
-                    <th className="p-3">Source</th>
-                    <th className="p-3">Detected Threat / Reason</th>
-                    <th className="p-3">Risk</th>
-                    <th className="p-3">Snippet</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-glassBorder text-slate-300">
-                  {quarantineLogs.length > 0 ? (
-                    quarantineLogs.map((q) => (
-                      <tr key={q.id} className="hover:bg-surfaceHover/50 transition-all">
-                        <td className="p-3 font-mono text-slate-400">#{q.id}</td>
-                        <td className="p-3 text-slate-400">{q.timestamp.split("T")[0]}</td>
-                        <td className="p-3 font-medium text-slate-200">{q.source}</td>
-                        <td className="p-3 text-trustRed">{q.reason}</td>
-                        <td className="p-3 font-bold text-trustYellow">{(q.risk_score * 100).toFixed(0)}%</td>
-                        <td className="p-3 font-mono text-[11px] text-slate-400 truncate max-w-xs">{q.snippet}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={6} className="p-6 text-center text-slate-500">
-                        No quarantined documents recorded in quarantine.db yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </section>
-    </main>
+        </main>
+      </div>
+    </div>
   );
 }
